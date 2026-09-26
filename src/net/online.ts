@@ -1,0 +1,210 @@
+import type { DataConnection, Peer as PeerType } from 'peerjs';
+
+import type { Stone } from '../gomoku/rules';
+
+/**
+ * Two-player rooms over WebRTC (PeerJS). The host registers a peer id derived
+ * from a six-digit room code; the guest connects to it. No game server is
+ * needed, so the game stays a static site. Signalling uses PeerJS's public
+ * broker; move data flows peer to peer.
+ */
+
+const PREFIX = 'pixi-gomoku-v1-';
+const PROTOCOL = 1;
+const PING_MS = 5000;
+// Generous: background tabs throttle timers heavily; real disconnects arrive via the close event.
+const TIMEOUT_MS = 90000;
+
+export type NetMessage =
+  | { type: 'hello'; name: string; protocol: number }
+  | { type: 'start'; hostStone: Stone; round: number }
+  | { type: 'move'; x: number; y: number; index: number }
+  | { type: 'resign' }
+  | { type: 'rematch' }
+  | { type: 'full' }
+  | { type: 'ping' }
+  | { type: 'bye' };
+
+export type Role = 'host' | 'guest';
+
+async function createPeer(id?: string): Promise<PeerType> {
+  const { Peer } = await import('peerjs');
+  return await new Promise((resolve, reject) => {
+    const peer = id ? new Peer(id, { debug: 0 }) : new Peer({ debug: 0 });
+    const onError = (error: Error & { type?: string }) => {
+      peer.destroy();
+      reject(error);
+    };
+    peer.once('open', () => {
+      peer.off('error', onError);
+      resolve(peer);
+    });
+    peer.once('error', onError);
+  });
+}
+
+export function randomCode() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+export function roomLink(code: string) {
+  const url = new URL(window.location.href);
+  url.search = '';
+  url.hash = '';
+  url.searchParams.set('room', code);
+  return url.toString();
+}
+
+/** An open connection between the two players. */
+export class OnlineLink {
+  opponentName = '好友';
+  private listeners = new Set<(message: NetMessage) => void>();
+  private closeListeners = new Set<(reason: string) => void>();
+  private lastSeen = Date.now();
+  private pinger: number;
+  private closed = false;
+
+  constructor(
+    readonly role: Role,
+    readonly code: string,
+    private peer: PeerType,
+    private conn: DataConnection,
+  ) {
+    conn.on('data', (data) => {
+      this.lastSeen = Date.now();
+      const message = data as NetMessage;
+      if (message?.type === 'ping') return;
+      if (message?.type === 'bye') {
+        this.finish('对手已离开房间');
+        return;
+      }
+      if (message?.type === 'full') {
+        this.finish('房间已满');
+        return;
+      }
+      if (message?.type === 'hello') this.opponentName = message.name.slice(0, 12) || '好友';
+      for (const listener of this.listeners) listener(message);
+    });
+    conn.on('close', () => this.finish('连接已断开'));
+    conn.on('error', () => this.finish('连接出错'));
+    peer.on('disconnected', () => {
+      // The broker link dropped; the data channel may still be alive, so try to reconnect quietly.
+      if (!this.closed) peer.reconnect();
+    });
+    this.pinger = window.setInterval(() => {
+      this.send({ type: 'ping' });
+      if (Date.now() - this.lastSeen > TIMEOUT_MS) this.finish('对手网络中断');
+    }, PING_MS);
+  }
+
+  get isOpen() {
+    return !this.closed;
+  }
+
+  send(message: NetMessage) {
+    if (this.closed || !this.conn.open) return;
+    this.conn.send(message);
+  }
+
+  onMessage(listener: (message: NetMessage) => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  onClose(listener: (reason: string) => void) {
+    this.closeListeners.add(listener);
+    return () => this.closeListeners.delete(listener);
+  }
+
+  private finish(reason: string) {
+    if (this.closed) return;
+    this.closed = true;
+    window.clearInterval(this.pinger);
+    for (const listener of this.closeListeners) listener(reason);
+    this.listeners.clear();
+    this.closeListeners.clear();
+    try {
+      this.conn.close();
+    } catch {
+      /* already closed */
+    }
+    this.peer.destroy();
+  }
+
+  /** Leave on purpose: tell the other side first. */
+  close() {
+    this.send({ type: 'bye' });
+    window.setTimeout(() => this.finish('你离开了房间'), 120);
+  }
+}
+
+export type HostedRoom = {
+  code: string;
+  link: string;
+  cancel: () => void;
+};
+
+/**
+ * Open a room and wait for one guest. Retries with a new code if the id is taken.
+ * `onGuest` fires once, with the link already open and greetings exchanged.
+ */
+export async function hostRoom(name: string, onGuest: (link: OnlineLink) => void): Promise<HostedRoom> {
+  let peer: PeerType | null = null;
+  let code = '';
+  for (let attempt = 0; attempt < 4 && !peer; attempt += 1) {
+    code = randomCode();
+    try {
+      peer = await createPeer(PREFIX + code);
+    } catch (error) {
+      if ((error as { type?: string }).type !== 'unavailable-id') throw error;
+    }
+  }
+  if (!peer) throw new Error('无法创建房间，请稍后再试');
+
+  const host = peer;
+  let taken = false;
+  host.on('connection', (conn) => {
+    conn.on('open', () => {
+      if (taken) {
+        conn.send({ type: 'full' } satisfies NetMessage);
+        window.setTimeout(() => conn.close(), 200);
+        return;
+      }
+      taken = true;
+      const link = new OnlineLink('host', code, host, conn);
+      link.send({ type: 'hello', name, protocol: PROTOCOL });
+      onGuest(link);
+    });
+  });
+
+  return {
+    code,
+    link: roomLink(code),
+    cancel: () => {
+      if (!taken) host.destroy();
+    },
+  };
+}
+
+/** Join a room by code. Rejects with a readable message when it does not exist. */
+export async function joinRoom(code: string, name: string): Promise<OnlineLink> {
+  const peer = await createPeer();
+  return await new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      peer.destroy();
+      reject(new Error('连接超时，请检查房间号或网络'));
+    }, 12000);
+    peer.on('error', (error: Error & { type?: string }) => {
+      window.clearTimeout(timer);
+      peer.destroy();
+      reject(new Error(error.type === 'peer-unavailable' ? '房间不存在或已关闭' : '连接失败，请稍后再试'));
+    });
+    const conn = peer.connect(PREFIX + code, { reliable: true });
+    conn.on('open', () => {
+      window.clearTimeout(timer);
+      const link = new OnlineLink('guest', code, peer, conn);
+      link.send({ type: 'hello', name, protocol: PROTOCOL });
+      resolve(link);
+    });
+  });
+}

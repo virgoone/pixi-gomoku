@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Art preview</title>
+<style>body{margin:0;background:#1b1033;color:#fff;font:12px sans-serif;display:flex;flex-wrap:wrap;gap:12px;padding:12px}figure{margin:0;display:grid;justify-items:center;gap:4px}img{max-width:260px;max-height:260px}</style></head>
+<body><script type="module">
+import * as art from '/src/svg/art.ts';
+import { TIERS } from '/src/svg/palette.ts';
+const add = (name, s, bg) => { const f = document.createElement('figure'); if (bg) f.style.background = bg; const i = new Image(); i.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s); f.append(i, name); document.body.append(f); };
+add('black', art.blackStone()); add('white', art.whiteStone()); add('board', art.board());
+for (const t of [0,1,2,3]) { add('body'+t, art.chestBody(TIERS[t])); add('lid'+t, art.chestLidClosed(TIERS[t])); add('lidOpen'+t, art.chestLidOpen(TIERS[t])); }
+add('treasure', art.chestTreasure()); add('badge-s', art.badge('silver')); add('badge-b', art.badge('bronze'));
+add('coin', art.coinIcon()); add('gem', art.gemIcon()); add('crown', art.crownIcon()); add('star', art.starIcon());
+add('rays', art.rays(), '#553'); add('ring', art.ring(), '#335'); add('sparkle', art.sparkle());
+for (const s of ['yellow','blue','green','red','white','dark']) { add('btn-'+s, art.buttonSkin(s)); add('round-'+s, art.roundSkin(s)); }
+add('panel', art.panel()); add('card', art.card(false)); add('card-sel', art.card(true)); add('pill', art.pill());
+for (const [k, f] of Object.entries(art.ICONS)) add(k, f(), '#555');
+for (const [k, f] of Object.entries(art.AVATARS)) add(k, f());
+add('logo', art.logoStones()); add('backdrop', art.backdrop(TIERS[2].bgInner, TIERS[2].bgOuter));
+</script></body></html>
