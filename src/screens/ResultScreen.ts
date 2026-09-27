@@ -2,6 +2,8 @@ import { Container, Graphics, NineSliceSprite, Sprite, type Text, type Ticker } 
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
+import { account, type SubmitResult } from '../net/account';
+import { openSignIn } from '../ui/authDialog';
 import { say } from '../app/voice';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
@@ -78,6 +80,9 @@ export class ResultScreen extends Container {
   private rematchSent = false;
   private rematchReceived = false;
   private unsubscribers: Array<() => void> = [];
+  /** Leaderboard submission for this game, once sent. */
+  private ladder: Promise<SubmitResult | null> | null = null;
+  private ladderButton: Button | null = null;
   private keyHandler = (event: KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') this.onTap();
   };
@@ -132,6 +137,76 @@ export class ResultScreen extends Container {
     window.addEventListener('keydown', this.keyHandler);
 
     if (online) this.listenOnline(online);
+    this.setupLadder();
+  }
+
+  // ---- leaderboard ----------------------------------------------------------------------
+
+  private get rated() {
+    return this.outcome.mode !== 'local' && Boolean(this.outcome.moves?.length);
+  }
+
+  /** Submit now if signed in; otherwise offer a sign-in that records this game. */
+  private setupLadder() {
+    if (!this.rated) return;
+    const decide = () => {
+      if (this.destroyed || this.ladder) return;
+      if (account.user) this.ladder = this.submitLadder();
+      else if (account.available) this.showLadderButton();
+    };
+    if (account.known) decide();
+    else void account.refresh().then(decide);
+  }
+
+  private submitLadder() {
+    return account.submit(this.outcome).catch((error: Error) => {
+      if (!this.destroyed) toast(this, error.message, this.w, this.ladderToastY);
+      return null;
+    });
+  }
+
+  private showLadderButton() {
+    const button = new Button({
+      text: '登录记录这局',
+      skin: 'blue',
+      width: 190,
+      height: 52,
+      fontSize: 18,
+      icon: 'podium',
+      onPress: async () => {
+        const user = await openSignIn('登录后，这一局和之后的成绩都会进入排行榜。');
+        if (!user || this.destroyed || this.ladder) return;
+        this.ladder = this.submitLadder();
+        button.visible = false;
+        this.announceLadder();
+      },
+    });
+    this.ladderButton = button;
+    this.addChild(button);
+    this.placeLadderButton();
+  }
+
+  private placeLadderButton() {
+    const button = this.ladderButton;
+    if (!button) return;
+    const scale = Math.min(1, this.w / 520);
+    button.scale.set(scale);
+    button.position.set(12 + 95 * scale, 12 + 26 * scale + (this.w < this.hud.totalWidth + 240 ? 16 + this.hud.totalHeight : 0) * scale);
+  }
+
+  /** Where the reward cards were: free once the rewards are collected. */
+  private get ladderToastY() {
+    const ui = Math.min(1, this.w / 520, this.h / 820);
+    return this.floor + 115 * ui;
+  }
+
+  /** Tell the player what the game did on the leaderboard. */
+  private announceLadder() {
+    void this.ladder?.then((result) => {
+      if (!result || this.destroyed) return;
+      const gained = result.points > 0 ? `排行榜 +${result.points} 分` : '成绩已记录';
+      toast(this, result.rank ? `${gained} · 第 ${result.rank} 名` : gained, this.w, this.ladderToastY);
+    });
   }
 
   private recordStats() {
@@ -193,6 +268,7 @@ export class ResultScreen extends Container {
     this.buttonsLayer.position.set(width / 2, this.floor + (40 + 150 + 30 + 42) * uiScale);
     this.hud.scale.set(hudScale);
     this.hud.position.set(width - this.hud.totalWidth * hudScale - 14, 16);
+    this.placeLadderButton();
   }
 
   // ---- sequence -----------------------------------------------------------------------
@@ -546,6 +622,7 @@ export class ResultScreen extends Container {
   }
 
   private showNextButtons() {
+    this.announceLadder();
     const replay = new Button({ text: '再来一局', skin: 'green', width: 220, height: 80, icon: 'restart', onPress: () => this.onReplay(replay) });
     const home = new Button({ text: '回到主页', skin: 'white', width: 220, height: 80, icon: 'home', onPress: () => this.goHome() });
     replay.x = -120;

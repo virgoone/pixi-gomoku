@@ -12,6 +12,7 @@ import { Backdrop } from '../ui/Backdrop';
 import { IconButton } from '../ui/Button';
 import { Hud } from '../ui/Hud';
 import { label } from '../ui/Label';
+import { LeaderboardView } from '../ui/LeaderboardView';
 import { ModeTile } from '../ui/ModeTile';
 import { PopTitle } from '../ui/PopTitle';
 import { TabBar } from '../ui/TabBar';
@@ -32,6 +33,7 @@ export class HomeScreen extends Container {
   private tiles: ModeTile[];
   private playView = new Container();
   private statsView = new Container();
+  private boardView = new LeaderboardView();
   private footer: Text;
   private time = 0;
 
@@ -55,6 +57,7 @@ export class HomeScreen extends Container {
       [
         { id: 'play', text: '对战', icon: 'swords' },
         { id: 'stats', text: '战绩', icon: 'trophy' },
+        { id: 'rank', text: '排行', icon: 'podium' },
       ],
       'play',
       (id) => this.showTab(id),
@@ -68,9 +71,10 @@ export class HomeScreen extends Container {
     this.playView.addChild(...this.tiles);
     this.buildStats();
     this.statsView.visible = false;
+    this.boardView.visible = false;
     this.footer = label('PixiJS · 所有画面均为 SVG 绘制', 'small', { fontSize: 12, fill: 0x9a8bc8 });
 
-    this.addChild(this.backdrop, this.stones, this.eyebrow, this.title, this.playView, this.statsView, this.footer, this.tabs, this.hud, this.sound);
+    this.addChild(this.backdrop, this.stones, this.eyebrow, this.title, this.playView, this.statsView, this.boardView, this.footer, this.tabs, this.hud, this.sound);
   }
 
   private buildStats() {
@@ -103,12 +107,17 @@ export class HomeScreen extends Container {
   }
 
   private showTab(id: string) {
-    const showing = id === 'stats' ? this.statsView : this.playView;
-    const hiding = id === 'stats' ? this.playView : this.statsView;
-    hiding.visible = false;
-    showing.visible = true;
-    const children = showing.children;
-    children.forEach((child, index) => {
+    const views: Record<string, Container> = { play: this.playView, stats: this.statsView, rank: this.boardView };
+    for (const [key, view] of Object.entries(views)) view.visible = key === id;
+    // The leaderboard polls only while it is on screen.
+    if (id === 'rank') this.boardView.activate();
+    else this.boardView.deactivate();
+    // The logo makes room for the taller leaderboard panel.
+    const compact = id === 'rank';
+    gsap.to([this.stones, this.eyebrow, this.title], { alpha: compact ? 0 : 1, duration: 0.2 });
+    const showing = views[id];
+    const items = id === 'rank' ? [showing] : showing.children;
+    items.forEach((child, index) => {
       const baseY = child.y;
       gsap.fromTo(child, { alpha: 0, y: baseY + 24 }, { alpha: 1, y: baseY, duration: 0.3, delay: index * 0.05, ease: 'back.out(2)' });
     });
@@ -181,6 +190,11 @@ export class HomeScreen extends Container {
     this.statsView.scale.set(statsScale);
     this.statsView.position.set(width / 2, (areaTop + areaBottom) / 2 - 20 * statsScale);
     this.footer.position.set(width / 2, height - 18);
+    // The leaderboard takes the space under the top bars (the logo hides while it shows).
+    const boardTop = topBottom + 16;
+    const boardHeight = Math.min(620, areaBottom - boardTop);
+    this.boardView.layout(Math.min(600, width - 24), boardHeight);
+    this.boardView.position.set(width / 2, boardTop + boardHeight / 2);
   }
 
   async show() {
@@ -201,9 +215,14 @@ export class HomeScreen extends Container {
     await gsap.to(this, { alpha: 0, duration: 0.2 });
   }
 
+  onLeave() {
+    this.boardView.deactivate();
+  }
+
   update(ticker: Ticker) {
     this.time += ticker.deltaMS / 1000;
     this.backdrop.update(ticker);
     this.stones.rotation = Math.sin(this.time * 1.4) * 0.04;
+    if (this.boardView.visible) this.boardView.update(ticker);
   }
 }

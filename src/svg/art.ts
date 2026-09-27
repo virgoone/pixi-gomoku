@@ -653,6 +653,7 @@ export const ICONS = {
   globe: () => icon('<circle cx="32" cy="32" r="22"/><path d="M10 32 H54"/><path d="M32 10 Q20 32 32 54 Q44 32 32 10"/>'),
   play: () => icon('<path d="M22 14 L50 32 L22 50 Z" fill="#fff"/>'),
   swords: () => icon('<path d="M12 12 L40 40 M52 12 L24 40"/><path d="M34 46 L46 34 M18 34 L30 46"/><path d="M40 40 L52 52 M24 40 L12 52"/>'),
+  podium: () => icon('<path d="M24 30 H40 V54 H24 Z" fill="#fff" fill-opacity="0.25"/><path d="M8 38 H24 V54 H8 Z M40 44 H56 V54 H40 Z"/><path d="M32 10 L35 17 L42 17 L36 21 L38 28 L32 24 L26 28 L28 21 L22 17 L29 17 Z" fill="#fff"/>'),
   trophy: () => icon('<path d="M20 10 H44 V26 A12 12 0 0 1 20 26 Z" fill="#fff" fill-opacity="0.25"/><path d="M20 16 H10 Q10 30 22 30 M44 16 H54 Q54 30 42 30"/><path d="M32 38 V48 M22 54 H42"/>'),
   restart: () => icon('<path d="M48 22 A20 20 0 1 0 52 36"/><path d="M50 10 V24 H36"/>'),
 };

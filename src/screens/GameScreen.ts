@@ -262,6 +262,8 @@ export class GameScreen extends Container {
       reason,
       brain: config.mode === 'ai' ? config.brain : undefined,
       opponentName: config.mode === 'online' ? config.link.opponentName : undefined,
+      moves: this.game.history.map((move) => [move.x, move.y] as [number, number]),
+      resignedBy: reason === 'resign' && winner !== null ? opponent(winner) : undefined,
     };
     const delay = line ? 1800 : 900;
     window.setTimeout(() => {
