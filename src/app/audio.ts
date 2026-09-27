@@ -226,6 +226,24 @@ export async function decodeClip(data: ArrayBuffer): Promise<AudioBuffer | null>
   return await audio.decodeAudioData(data);
 }
 
+const leadIns = new WeakMap<AudioBuffer, number>();
+
+/**
+ * Seconds of near-silence at the start of a clip (TTS output carries ~0.18 s),
+ * less a short margin; skipped so a line lands on its animation beat.
+ */
+function leadIn(buffer: AudioBuffer) {
+  let offset = leadIns.get(buffer);
+  if (offset === undefined) {
+    const data = buffer.getChannelData(0);
+    let index = 0;
+    while (index < data.length && Math.abs(data[index]) < 0.01) index += 1;
+    offset = index < data.length ? Math.max(0, index / buffer.sampleRate - 0.02) : 0;
+    leadIns.set(buffer, offset);
+  }
+  return offset;
+}
+
 /** Play a decoded clip through the effects chain (dry, a touch of reverb). Returns a stopper. */
 export function playClip(buffer: AudioBuffer, gain = 1): (() => void) | null {
   const b = getBus();
@@ -236,7 +254,7 @@ export function playClip(buffer: AudioBuffer, gain = 1): (() => void) | null {
   g.gain.value = gain;
   source.connect(g);
   send(b, g, 0.12);
-  source.start();
+  source.start(0, leadIn(buffer));
   return () => {
     try {
       source.stop();

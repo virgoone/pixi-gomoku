@@ -3,8 +3,8 @@ import { getProfile } from './storage';
 import { VOICE_LINES, type VoiceLineId } from './voiceLines';
 
 /**
- * Spoken announcements. The game ships voice clips rendered with Fish Audio
- * TTS (public/voice/<id>.mp3, see `npm run voice`); when a clip is missing or
+ * Spoken announcements. The game ships voice clips rendered with Edge neural
+ * TTS (public/voice/<id>.mp3, see `npm run voice:edge`); when a clip is missing or
  * cannot be decoded it falls back to the browser's speech synthesis with the
  * same text. Everything is silent while the game is muted.
  */

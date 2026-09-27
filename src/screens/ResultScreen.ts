@@ -437,7 +437,7 @@ export class ResultScreen extends Container {
     sfx.open(strength);
     gsap.delayedCall(0.35, () => void (this.destroyed || sfx.fanfare(tier)));
     // Only a bundled clip, and only on the beat: robotic speech over the fanfare sounds broken.
-    say(`chest${tier}`, { delay: 0.45, fallback: false, maxLate: 0.4 });
+    say(`chest${tier}`, { delay: 0.75, fallback: false, maxLate: 0.4 });
 
     this.fx.flash(center.x, center.y, Math.max(this.w, this.h) * (0.6 + 0.4 * strength), { tint: 0xfff4d6, peak: SHOW.bloom * strength });
     this.flashBurst(glow, 0.6 + 0.6 * strength);

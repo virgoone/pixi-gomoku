@@ -37,7 +37,7 @@
 
 输棋或和棋显示银色 / 铜色徽章和安慰奖。
 
-对局结束、宝箱升级和开箱时有中文语音播报，用的是 Fish Audio TTS 预先生成、打包进 `public/voice/` 的可爱女声（公开声音「萝莉萌妹」）。缺少音频时退回浏览器自带的语音合成（「升级！」这句只用音频）。音效全部用 Web Audio 实时合成：柔和的铃音与木质落子声，经过低通、混响和压缩；静音开关同时关闭音效和语音。
+对局结束、宝箱升级和开箱时有中文语音播报，用的是 [edge-tts](https://github.com/rany2/edge-tts)（微软 Edge 在线神经语音，活泼的卡通女声 `zh-CN-XiaoyiNeural`）预先生成、打包进 `public/voice/` 的音频，播放时自动跳过开头静音以卡准动画节拍。对局结束的播报缺少音频时退回浏览器自带的语音合成；结算页（升级、开箱）的台词只用音频，迟到超过 0.4 秒就不播。音效全部用 Web Audio 实时合成：铃音、木质落子声、起跳/转身/蓄力/爆炸/号角/计数滴答，经过低通、混响、压缩和限幅；静音开关同时关闭音效和语音。
 宝箱照参考视频画成 3/4 视角的立体木箱（桶形箱盖、木板箱身、包角和 U 形锁扣），按等级换配色：普通绿、稀有蓝、史诗紫配黄/金包边，传说黄箱配粉色包边。
 
 人机或在线对局中，自己落子后中途退出会中断连胜（暂停菜单会提示）；对手先离开则不受影响。
@@ -89,7 +89,16 @@ npm run build      # tsc 类型检查 + vite 打包到 dist/
 
 ## 语音
 
-台词在 `src/app/voiceLines.ts`。改了台词或想换声音后重新生成（只会重做有变化的句子）：
+台词在 `src/app/voiceLines.ts`。改了台词或想换声音后重新生成（只会重做有变化的句子）。
+默认用 edge-tts，不需要密钥，只需装好 [uv](https://docs.astral.sh/uv/)（脚本通过 `uvx edge-tts` 调用）或 `pipx install edge-tts`：
+
+```bash
+npm run voice:edge                                  # 生成到 public/voice/*.mp3
+EDGE_VOICE=zh-CN-XiaoxiaoNeural EDGE_RATE=+0% npm run voice:edge -- --force   # 换声音/语速、全部重做
+uvx edge-tts --list-voices | grep zh-CN             # 可选的中文声音
+```
+
+也可以改用 Fish Audio TTS（需要 API Key）：
 
 ```bash
 FISH_API_KEY=你的密钥 npm run voice            # 生成到 public/voice/*.mp3
@@ -173,4 +182,4 @@ tests/               Vitest 单元测试
 
 ## 开源许可
 
-项目代码采用 [MIT License](./LICENSE)，欢迎 Fork、修改和用于自己的项目。依赖库与字体保留各自的许可证；部署凭据、Resend Key 和 Fish Audio Key 需自行配置，不能放进源码或 `VITE_*` 变量。
+项目代码采用 [MIT License](./LICENSE)，欢迎 Fork、修改和用于自己的项目。依赖库与字体保留各自的许可证；部署凭据、Resend Key 和 Fish Audio Key 需自行配置（默认语音用 edge-tts，不需要 Key），不能放进源码或 `VITE_*` 变量。
