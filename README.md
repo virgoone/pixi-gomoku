@@ -69,7 +69,7 @@ npm run build      # tsc 类型检查 + vite 打包到 dist/
 - 部署管理：<https://app.netlify.com/projects/pixi-gomoku>
 
 **自动 CI/CD 由 Netlify GitHub App 执行**：仓库的 `main` 推送后，Netlify 自动安装锁定依赖，
-执行 `npm test && npm run build`（26 项单元测试、类型检查、生产打包），全部成功才发布 `dist/`。
+执行 `npm test && npm run build`（单元测试、类型检查、生产打包），全部成功才发布 `dist/`。
 构建命令和 Node 版本由 `netlify.toml` 管理；失败时保留上一版正式站点。
 
 GitHub Actions 的 `.github/workflows/ci.yml` 保留为手动备用发布流程 **Manual test and deploy**。

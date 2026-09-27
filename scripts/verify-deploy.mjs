@@ -16,7 +16,7 @@ for (let attempt = 0; result.state !== 'ready' && attempt < 60; attempt += 1) {
   result = await response.json();
 }
 assert.equal(result.state, 'ready', 'Deploy must become ready within five minutes');
-const base = result.deploy_ssl_url;
+const base = result.links?.permalink ?? result.deploy_ssl_url;
 assert.ok(base?.startsWith('https://'), 'Netlify must return an HTTPS deploy URL');
 
 async function verify(directory, prefix = '') {
