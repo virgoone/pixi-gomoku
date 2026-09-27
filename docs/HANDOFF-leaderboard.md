@@ -14,8 +14,9 @@
   - AI 着法在浏览器里算，服务器无法证明来自 AI；靠复盘、限频和管理员删人兜底。
 - **实时刷新**：Netlify Functions 不支持长连接，首页「排行」每 4 秒轮询，带 ETag，没变化回 304；标签页在后台时暂停。
 - **登录时机**：游戏与结算都不要求登录、不弹登录框；只有进入首页「排行」时要求登录。排行榜 API 也要求有效会话，退出后清除页面内的榜单。所有玩家都使用自己的邮箱登录。
-- **本机补传与跨设备合并**：每局结束先把完整棋谱、UUID 和结束时间保存到 localStorage；游客刷新后仍保留，登录后归属该账号并补传。已归属 A 的记录不会传给 B。网络失败、限流会保留并重试，收到成功响应才移除。不同设备向同一账号增量提交，玩家统计与已处理对局 ID 在同一个 Blobs 文档中条件写入，重复请求只记一次；连胜按结束时间合并计算。金币等宝箱存档仍属于本机。
-- **历史兼容**：旧版本只保存汇总战绩，没有棋谱、难度与对局编号，无法可靠换算成排行榜积分，因此保留本机存档，不追溯上传。新版本记录的完整对局可以离线补传。
+- **本机补传与跨设备合并**：每局结束先把完整棋谱、UUID 和结束时间保存到 localStorage；游客刷新后仍保留，登录后归属该账号并补传。已归属 A 的记录不会传给 B。网络失败、限流会保留并重试，收到成功响应才移除。不同设备向同一账号增量提交，玩家统计与已处理对局 ID 在同一个 Blobs 文档中条件写入，重复请求只记一次；排行榜连胜按结束时间合并计算。
+- **历史兼容与账号存档**：`LocalProgress` 为旧汇总存档保存稳定导入 ID，首次登录合并金币、宝石、皇冠及胜负战绩，原始存档保留。新的变动使用每事件一个 localStorage 键，收到云端检查点后清理，检查点包含本设备已处理 ID，响应丢失或刷新不重复累计。服务端 `profiles/<userId>` 通过条件写入原子保存合计与回执，`profile-owners/<eventId>` 绑定首次账号。独立设备旧存档相加，云端合计不作为新导入。旧战绩没有棋谱和难度，因此只进入账号「战绩」，不补计排行榜积分。
+- **存档同步时机**：登录立即导入；本地奖励和战绩变化后 250ms 合批，最多每批 50 条；前台每 30 秒、回到前台、重新打开或恢复网络时同步。页面显示同步状态，点击可手动刷新。偏好仍为本机设置，退出后展示游客存档，旧账号存档保留并隔离。历史最高连胜取最大值，个人当前连胜使用最近一次设备结算快照，历史快照不能覆盖新对局；并行设备无法还原旧版缺失的时间线。
 
 ## 2. 需要你配置的东西
 
@@ -88,6 +89,9 @@ http://localhost:5173/?demo=result&brain=owl&moves=9&rated
 | `server/api.ts` | 所有 `/api/*` 路由、Cookie、Origin 校验、错误格式 `{ error: { code, message } }` |
 | `server/auth.ts` | 验证码、用户、会话；邮件模板；`AUTH_SECRET` 用于哈希 |
 | `server/board.ts` | 棋谱校验与复盘（`judge`）、积分、玩家战绩、排行榜文档（ETag 条件写入重试） |
+| `server/profile.ts` | 个人存档导入、事件归属、原子合并与回执去重；独立于排行榜积分 |
+| `src/profile/localProgress.ts` | 本机历史快照、事件队列、账号隔离与云端检查点 |
+| `src/net/profileSync.ts` | 登录、变动、前台恢复和重试时的存档同步 |
 | `server/kv.ts` | 存储接口：`blobsKV`（生产）与 `MemoryKV`（测试、本地） |
 | `src/result/ladder.ts` | 积分表，前后端共用 |
 | `src/net/account.ts` | 前端：会话状态、登录、补传与重试、`BoardFeed` 轮询 |
@@ -105,6 +109,7 @@ http://localhost:5173/?demo=result&brain=owl&moves=9&rated
 | GET | `/api/auth/session` | 当前用户或 `null` |
 | POST | `/api/auth/sign-out` | 退出 |
 | GET / PATCH | `/api/me` | 我的战绩与名次 / 改昵称 `{ name }` |
+| POST | `/api/profile` | `{ userId, deviceId, events }`；需要登录，账号匹配，最多 50 个事件 / 64 KB；返回个人存档、版本和本设备回执。空事件数组用于拉取最新存档 |
 | GET | `/api/leaderboard` | 需要登录；前 50 名，支持 `If-None-Match` → 304 |
 | POST | `/api/results` | 需要登录；`{ userId, gameId, finishedAt, mode, brain?, myStone, moves: [[x,y],...], resigned? }`，`gameId` 为 UUID v4，`finishedAt` 为 Unix 毫秒；账号必须与会话相同 |
 | DELETE | `/api/admin/players/:userId` | 仅 `ADMIN_EMAILS` 中的账号 |

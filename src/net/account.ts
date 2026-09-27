@@ -1,5 +1,6 @@
 import type { Outcome } from '../result/scoring';
 import { ResultQueue } from './resultQueue';
+import { ProfileSync } from './profileSync';
 
 /**
  * Client side of the email sign-in and the leaderboard (served by the
@@ -47,6 +48,13 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
 type Listener = (user: PublicUser | null) => void;
 
 class Account {
+  readonly progress = new ProfileSync(async (body) => {
+    try { return await call('/profile', { method: 'POST', body: JSON.stringify(body) }); }
+    catch (error) {
+      if (error instanceof ApiError && (error.status === 401 || error.code === 'account_changed')) this.set(null);
+      throw error;
+    }
+  });
   user: PublicUser | null = null;
   /** False until the first session check finished (or failed). */
   known = false;
@@ -59,7 +67,12 @@ class Account {
   private retryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
-    if (typeof window !== 'undefined') window.addEventListener('online', () => void this.refresh());
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => void this.refresh());
+      window.addEventListener('storage', (event: StorageEvent) => {
+        if (event.key === 'pixi-gomoku:progress:v1:active') void this.refresh();
+      });
+    }
   }
 
   onChange(listener: Listener) {
@@ -67,9 +80,10 @@ class Account {
     return () => this.listeners.delete(listener);
   }
 
-  private set(user: PublicUser | null) {
+  private set(user: PublicUser | null, preserveOffline = false) {
     this.user = user;
     this.known = true;
+    this.progress.setUser(user?.id ?? null, preserveOffline);
     for (const listener of this.listeners) listener(user);
     if (user) {
       this.queue.claim(user.id);
@@ -88,7 +102,7 @@ class Account {
       })
       .catch(() => {
         this.available = false;
-        this.set(null);
+        this.set(null, true);
       })
       .finally(() => {
         this.checking = null;
