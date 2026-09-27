@@ -5,7 +5,7 @@ import { sfx } from '../app/audio';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
-import { BRAINS, type BrainId } from '../gomoku/ai';
+import { BRAINS, type BrainId, type EngineState, masterEngine } from '../gomoku/ai';
 import { RULE_NAMES } from '../gomoku/renju';
 import { BLACK, type Rule, WHITE } from '../gomoku/rules';
 import { Button } from '../ui/Button';
@@ -13,7 +13,10 @@ import { label } from '../ui/Label';
 import { card } from '../ui/Panel';
 import { BasePopup } from './BasePopup';
 
-/** Pick an AI opponent, who moves first and the rule. */
+/**
+ * Pick an AI opponent, who moves first and the rule. Picking the master starts
+ * downloading its engine; the start button waits for it and shows the progress.
+ */
 export class AiSetupPopup extends BasePopup {
   private brain: BrainId;
   private playFirst: boolean;
@@ -21,33 +24,36 @@ export class AiSetupPopup extends BasePopup {
   private cards = new Map<BrainId, { bg: NineSliceSprite; root: Container }>();
   private firstButton: Button;
   private ruleButton: Button;
+  private startButton: Button;
+  private unsubscribe: () => void;
 
   constructor(private onStart: (brain: BrainId, humanStone: 1 | 2, rule: Rule) => void) {
-    super('选择对手', 640, 640);
+    super('选择对手', 720, 640);
     const profile = getProfile();
     this.brain = profile.lastBrain;
     this.playFirst = profile.playFirst;
     this.rule = profile.rule;
 
-    const cardWidth = 180;
+    const cardWidth = 156;
     const cardHeight = 300;
+    const gap = 12;
     BRAINS.forEach((info, index) => {
       const root = new Container();
       const bg = card(cardWidth, cardHeight, info.id === this.brain);
       const avatar = new Sprite(tex(`avatar-${info.id}`));
       avatar.anchor.set(0.5);
-      avatar.width = avatar.height = 104;
+      avatar.width = avatar.height = 96;
       avatar.position.set(cardWidth / 2, 76);
       const level = label(info.title, 'dark', { fontSize: 16, fill: 0x8a6bd1 });
       level.position.set(cardWidth / 2, 142);
       const name = label(info.name, 'dark', { fontSize: 24 });
       name.position.set(cardWidth / 2, 172);
       const stars = new Container();
-      for (let star = 0; star < 3; star += 1) {
+      for (let star = 0; star < 4; star += 1) {
         const icon = new Sprite(tex('star'));
         icon.anchor.set(0.5);
         icon.width = icon.height = 24;
-        icon.x = (star - 1) * 26;
+        icon.x = (star - 1.5) * 26;
         icon.alpha = star <= info.level ? 1 : 0.2;
         stars.addChild(icon);
       }
@@ -56,7 +62,7 @@ export class AiSetupPopup extends BasePopup {
       description.anchor.set(0.5, 0);
       description.position.set(cardWidth / 2, 226);
       root.addChild(bg, avatar, level, name, stars, description);
-      root.position.set(-cardWidth * 1.5 - 14 + index * (cardWidth + 14), -210);
+      root.position.set(-(BRAINS.length * cardWidth + (BRAINS.length - 1) * gap) / 2 + index * (cardWidth + gap), -210);
       root.eventMode = 'static';
       root.cursor = 'pointer';
       root.on('pointertap', () => this.select(info.id));
@@ -75,6 +81,11 @@ export class AiSetupPopup extends BasePopup {
       height: 84,
       icon: 'play',
       onPress: () => {
+        if (this.brain === 'master' && masterEngine.state.status !== 'ready') {
+          // Only reachable after a failed download: the button then offers a retry.
+          void masterEngine.load().catch(() => undefined);
+          return;
+        }
         updateProfile({ lastBrain: this.brain, playFirst: this.playFirst, rule: this.rule });
         const brain = this.brain;
         const stone = this.playFirst ? BLACK : WHITE;
@@ -83,7 +94,36 @@ export class AiSetupPopup extends BasePopup {
       },
     });
     start.y = 238;
+    this.startButton = start;
+    this.unsubscribe = masterEngine.onChange((state) => this.renderEngine(state));
     this.body.addChild(this.firstButton, this.ruleButton, start);
+    this.prepareEngine();
+  }
+
+  /** Start the master's download as soon as it is picked (or was picked last time). */
+  private prepareEngine() {
+    if (this.brain === 'master') void masterEngine.load().catch(() => undefined);
+    this.renderEngine(masterEngine.state);
+  }
+
+  private renderEngine(state: EngineState) {
+    if (this.destroyed) return;
+    const button = this.startButton;
+    if (this.brain !== 'master' || state.status === 'ready') {
+      button.setText('开始对局');
+      button.setEnabled(true);
+    } else if (state.status === 'error') {
+      button.setText('加载失败 · 重试');
+      button.setEnabled(true);
+    } else {
+      button.setText(`加载引擎 ${Math.round(state.progress * 100)}%`);
+      button.setEnabled(false);
+    }
+  }
+
+  override destroy(options?: Parameters<Container['destroy']>[0]) {
+    this.unsubscribe();
+    super.destroy(options);
   }
 
   private firstText() {
@@ -112,5 +152,6 @@ export class AiSetupPopup extends BasePopup {
       entry.bg.texture = tex(brain === id ? 'card-selected' : 'card');
       if (brain === id) gsap.fromTo(entry.root.scale, { x: 1.06, y: 1.06 }, { x: 1, y: 1, duration: 0.3, ease: 'back.out(3)' });
     }
+    this.prepareEngine();
   }
 }

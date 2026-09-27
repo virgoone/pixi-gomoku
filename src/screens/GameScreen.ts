@@ -192,8 +192,11 @@ export class GameScreen extends Container {
     const token = ++this.token;
     this.aiThinking = true;
     this.undoButton.setEnabled(false);
-    const move = await this.ai.think(this.game.board, this.game.turn, this.game.history.length < 2 ? 500 : 380);
+    const ai = this.ai;
+    const before = ai.effectiveBrain;
+    const move = await ai.think(this.game.board, this.game.turn, this.game.history.length < 2 ? 500 : 380);
     if (token !== this.token || this.destroyed) return;
+    if (ai.effectiveBrain !== before) toast(this, `大师引擎出错，由${brainInfo(ai.effectiveBrain).name}接手，本局按它结算`, this.w);
     this.aiThinking = false;
     this.apply(move);
   }
@@ -303,7 +306,8 @@ export class GameScreen extends Container {
       totalMoves: this.game.history.length,
       winnerMoves: winner ? this.game.movesBy(winner) : 0,
       reason,
-      brain: config.mode === 'ai' ? config.brain : undefined,
+      // The owl stands in when the master's engine fails; the result counts as the owl's.
+      brain: config.mode === 'ai' ? this.ai?.effectiveBrain ?? config.brain : undefined,
       opponentName: config.mode === 'online' ? config.link.opponentName : undefined,
       moves: this.game.history.map((move) => [move.x, move.y] as [number, number]),
       resignedBy: reason === 'resign' && winner !== null ? opponent(winner) : undefined,

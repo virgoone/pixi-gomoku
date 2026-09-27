@@ -5,7 +5,7 @@ import type { BrainId } from '../gomoku/ai/brains';
  * them) and the client (which previews them).
  */
 export const LADDER_POINTS = {
-  ai: { sprout: 1, fox: 3, owl: 6 } satisfies Record<BrainId, number>,
+  ai: { sprout: 1, fox: 3, owl: 6, master: 10 } satisfies Record<BrainId, number>,
   online: 5,
   draw: 1,
 } as const;

@@ -2,7 +2,7 @@ import { forbiddenAt } from '../renju';
 import { BLACK, type Board, cloneBoard, EMPTY, opponent, type Point, type Rule, set, sizeOf, type Stone, winningLine } from '../rules';
 import { candidateMoves, evaluatePoint, type RankedMove, rankMoves, SCORE } from './patterns';
 
-export type BrainId = 'sprout' | 'fox' | 'owl';
+export type BrainId = 'sprout' | 'fox' | 'owl' | 'master';
 
 export type BrainInfo = {
   id: BrainId;
@@ -10,13 +10,15 @@ export type BrainInfo = {
   title: string;
   description: string;
   /** Used for the result chest tier: harder opponents give better chests. */
-  level: 0 | 1 | 2;
+  level: 0 | 1 | 2 | 3;
 };
 
 export const BRAINS: BrainInfo[] = [
   { id: 'sprout', name: '豆芽', title: '入门', description: '刚学会下棋，偶尔会看漏你的活三。', level: 0 },
   { id: 'fox', name: '狐狸阿明', title: '进阶', description: '攻守兼顾，不会放过明显的机会。', level: 1 },
-  { id: 'owl', name: '猫头鹰棋圣', title: '大师', description: '会往后推演几步，喜欢做双杀。', level: 2 },
+  { id: 'owl', name: '猫头鹰棋圣', title: '高手', description: '会往后推演几步，喜欢做双杀。', level: 2 },
+  // Played by the Rapfi engine (master.ts); the heuristics below stand in only if it fails.
+  { id: 'master', name: '神龙棋仙', title: '大师', description: '由开源引擎 Rapfi 执棋，几乎不失误。', level: 3 },
 ];
 
 export function brainInfo(id: BrainId) {
@@ -156,6 +158,7 @@ function owlMove(board: Board, stone: Stone, rule: Rule, budgetMs = 900): Point 
 }
 
 export function chooseMove(id: BrainId, board: Board, stone: Stone, random: Random = Math.random, rule: Rule = 'freestyle'): Point {
+  // 'master' reaches here only as a stand-in when its engine is unavailable.
   const move: Point | undefined = id === 'sprout' ? sproutMove(board, stone, random, rule) : id === 'fox' ? foxMove(board, stone, random, rule) : owlMove(board, stone, rule);
   if (move) return { x: move.x, y: move.y };
   // Every nearby point is forbidden (renju): take any legal point on the board.
