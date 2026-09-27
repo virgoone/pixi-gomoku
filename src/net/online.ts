@@ -1,6 +1,6 @@
 import type { DataConnection, Peer as PeerType } from 'peerjs';
 
-import type { Stone } from '../gomoku/rules';
+import type { Rule, Stone } from '../gomoku/rules';
 
 /**
  * Two-player rooms over WebRTC (PeerJS). The host registers a peer id derived
@@ -10,14 +10,17 @@ import type { Stone } from '../gomoku/rules';
  */
 
 const PREFIX = 'pixi-gomoku-v1-';
-const PROTOCOL = 1;
+/** 1: first release. 2: `start` carries the rule (renju rooms). */
+export const PROTOCOL = 2;
+/** Oldest protocol that understands renju rooms. */
+export const RENJU_PROTOCOL = 2;
 const PING_MS = 5000;
 // Generous: background tabs throttle timers heavily; real disconnects arrive via the close event.
 const TIMEOUT_MS = 90000;
 
 export type NetMessage =
   | { type: 'hello'; name: string; protocol: number }
-  | { type: 'start'; hostStone: Stone; round: number }
+  | { type: 'start'; hostStone: Stone; round: number; rule: Rule }
   | { type: 'move'; x: number; y: number; index: number }
   | { type: 'resign' }
   | { type: 'rematch' }
@@ -37,7 +40,10 @@ export function parseMessage(data: unknown): NetMessage | null {
     case 'hello':
       return typeof m.name === 'string' ? { type: 'hello', name: m.name, protocol: Number(m.protocol) || 0 } : null;
     case 'start':
-      return (m.hostStone === 1 || m.hostStone === 2) && isInt(m.round, 1, 1e6) ? { type: 'start', hostStone: m.hostStone, round: m.round as number } : null;
+      // A host from before protocol 2 sends no rule: that room is free-style.
+      return (m.hostStone === 1 || m.hostStone === 2) && isInt(m.round, 1, 1e6)
+        ? { type: 'start', hostStone: m.hostStone, round: m.round as number, rule: m.rule === 'renju' ? 'renju' : 'freestyle' }
+        : null;
     case 'move':
       return isInt(m.x, 0, 14) && isInt(m.y, 0, 14) && isInt(m.index, 0, 224) ? { type: 'move', x: m.x as number, y: m.y as number, index: m.index as number } : null;
     case 'resign':
@@ -67,6 +73,14 @@ async function createPeer(id?: string): Promise<PeerType> {
   });
 }
 
+/**
+ * The rule a room actually plays: renju only if the guest's client knows it,
+ * otherwise an older guest would accept moves the host refuses.
+ */
+export function agreedRule(wanted: Rule, opponentProtocol: number): Rule {
+  return wanted === 'renju' && opponentProtocol >= RENJU_PROTOCOL ? 'renju' : 'freestyle';
+}
+
 export function randomCode() {
   return String(Math.floor(100000 + Math.random() * 900000));
 }
@@ -82,6 +96,11 @@ export function roomLink(code: string) {
 /** An open connection between the two players. */
 export class OnlineLink {
   opponentName = '好友';
+  /** Protocol from the opponent's hello; 0 until it arrives. */
+  opponentProtocol = 0;
+  /** Resolves when the opponent's hello has arrived. */
+  readonly greeted: Promise<void>;
+  private resolveGreeted: () => void = () => undefined;
   private listeners = new Set<(message: NetMessage) => void>();
   private closeListeners = new Set<(reason: string) => void>();
   private lastSeen = Date.now();
@@ -94,6 +113,9 @@ export class OnlineLink {
     private peer: PeerType,
     private conn: DataConnection,
   ) {
+    this.greeted = new Promise((resolve) => {
+      this.resolveGreeted = resolve;
+    });
     conn.on('data', (data) => {
       this.lastSeen = Date.now();
       const message = parseMessage(data);
@@ -106,7 +128,11 @@ export class OnlineLink {
         this.finish('房间已满');
         return;
       }
-      if (message.type === 'hello') this.opponentName = message.name.slice(0, 12) || '好友';
+      if (message.type === 'hello') {
+        this.opponentName = message.name.slice(0, 12) || '好友';
+        this.opponentProtocol = message.protocol;
+        this.resolveGreeted();
+      }
       for (const listener of this.listeners) listener(message);
     });
     conn.on('close', () => this.finish('连接已断开'));

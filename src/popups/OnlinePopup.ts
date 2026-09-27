@@ -3,9 +3,10 @@ import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
 import { navigation } from '../app/navigation';
-import { getProfile } from '../app/storage';
-import { BLACK, type Stone, WHITE } from '../gomoku/rules';
-import { type HostedRoom, hostRoom, joinRoom, type OnlineLink } from '../net/online';
+import { getProfile, updateProfile } from '../app/storage';
+import { RULE_NAMES } from '../gomoku/renju';
+import { BLACK, type Rule, type Stone, WHITE } from '../gomoku/rules';
+import { agreedRule, type HostedRoom, hostRoom, joinRoom, type OnlineLink } from '../net/online';
 import { Button } from '../ui/Button';
 import { label } from '../ui/Label';
 import { BasePopup } from './BasePopup';
@@ -13,14 +14,19 @@ import { BasePopup } from './BasePopup';
 const WAIT_SECONDS = 30;
 
 type Callbacks = {
-  onStart: (link: OnlineLink, myStone: Stone) => void;
-  /** Nobody joined: play the AI instead. */
-  onFallback: () => void;
+  /** `notice` explains a rule the host asked for but could not get. */
+  onStart: (link: OnlineLink, myStone: Stone, rule: Rule, notice?: string) => void;
+  /** Nobody joined: play the AI instead, under the rule the host picked. */
+  onFallback: (rule: Rule) => void;
 };
 
+/** How long the host waits for the guest's hello (it carries the protocol version). */
+const HELLO_WAIT_MS = 1500;
+
 /**
- * Create or join a room. When hosting and nobody shows up within 30 seconds,
- * the host is moved to a game against the AI.
+ * Create or join a room. The host picks the rule; the guest plays whatever the
+ * start message says. When hosting and nobody shows up within 30 seconds, the
+ * host is moved to a game against the AI.
  */
 export class OnlinePopup extends BasePopup {
   private view = new Container();
@@ -34,6 +40,8 @@ export class OnlinePopup extends BasePopup {
   private slots: Text[] = [];
   private status: Text | null = null;
   private joining = false;
+  private rule: Rule = getProfile().rule;
+  private ruleButton: Button | null = null;
   private keyHandler = (event: KeyboardEvent) => this.onKey(event);
 
   constructor(
@@ -56,6 +64,7 @@ export class OnlinePopup extends BasePopup {
     this.spinner = null;
     this.slots = [];
     this.status = null;
+    this.ruleButton = null;
     window.removeEventListener('keydown', this.keyHandler);
   }
 
@@ -63,14 +72,26 @@ export class OnlinePopup extends BasePopup {
     this.reset();
     this.title.text = '在线房间';
     const hint = label('创建房间后把邀请链接发给好友；\n没人加入时可以先和电脑下。', 'body', { align: 'center', lineHeight: 30, fontSize: 19 });
-    hint.y = -150;
+    hint.y = -165;
     const create = new Button({ text: '创建房间', skin: 'green', width: 320, height: 88, icon: 'users', onPress: () => void this.host() });
-    create.y = -30;
+    create.y = -60;
+    this.ruleButton = new Button({ text: this.ruleText(), skin: 'white', width: 320, height: 62, fontSize: 20, onPress: () => this.toggleRule() });
+    this.ruleButton.y = 30;
     const join = new Button({ text: '输入房间号', skin: 'blue', width: 320, height: 88, icon: 'globe', onPress: () => this.showJoin('') });
-    join.y = 80;
-    const note = label('联机基于 WebRTC 点对点连接，无需注册', 'small', { fontSize: 13 });
-    note.y = 200;
-    this.view.addChild(hint, create, join, note);
+    join.y = 130;
+    const note = label('规则由房主决定 · 联机基于 WebRTC 点对点连接，无需注册', 'small', { fontSize: 13 });
+    note.y = 225;
+    this.view.addChild(hint, create, this.ruleButton, join, note);
+  }
+
+  private ruleText() {
+    return this.rule === 'renju' ? `房间规则：${RULE_NAMES.renju} · 黑棋有禁手` : `房间规则：${RULE_NAMES.freestyle}`;
+  }
+
+  private toggleRule() {
+    this.rule = this.rule === 'renju' ? 'freestyle' : 'renju';
+    updateProfile({ rule: this.rule });
+    this.ruleButton?.setText(this.ruleText());
   }
 
   // ---- hosting ------------------------------------------------------------------------
@@ -97,7 +118,7 @@ export class OnlinePopup extends BasePopup {
     this.reset();
     const room = this.room;
     if (import.meta.env.DEV) (window as unknown as { __gomokuRoom?: string }).__gomokuRoom = room.code;
-    const caption = label('房间号', 'body', { fontSize: 18 });
+    const caption = label(this.rule === 'renju' ? `房间号 · ${RULE_NAMES.renju}（黑棋有禁手）` : '房间号', 'body', { fontSize: 18 });
     caption.y = -170;
     const code = label(room.code.split('').join(' '), 'title', { fontSize: 72, fill: 0xffd23f });
     code.y = -110;
@@ -156,8 +177,10 @@ export class OnlinePopup extends BasePopup {
     this.started = true;
     this.link = link;
     sfx.win();
-    // Give the guest a moment to subscribe before the start signal.
-    window.setTimeout(() => {
+    // Give the guest a moment to subscribe before the start signal, and wait
+    // for its hello: the protocol version decides whether renju is possible.
+    const delay = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+    void Promise.all([delay(400), Promise.race([link.greeted, delay(HELLO_WAIT_MS)])]).then(() => {
       if (this.destroyed) {
         // Closed by the player in the meantime.
         link.close();
@@ -169,9 +192,11 @@ export class OnlinePopup extends BasePopup {
         this.fallback();
         return;
       }
-      link.send({ type: 'start', hostStone: BLACK, round: 1 });
-      void navigation.dismissPopup().then(() => this.callbacks.onStart(link, BLACK));
-    }, 400);
+      const rule = agreedRule(this.rule, link.opponentProtocol);
+      const notice = rule !== this.rule ? '对方的版本还不支持连珠，本局按无禁手进行' : undefined;
+      link.send({ type: 'start', hostStone: BLACK, round: 1, rule });
+      void navigation.dismissPopup().then(() => this.callbacks.onStart(link, BLACK, rule, notice));
+    });
   }
 
   private fallback() {
@@ -179,7 +204,8 @@ export class OnlinePopup extends BasePopup {
     this.room?.cancel();
     this.room = null;
     this.started = true;
-    void navigation.dismissPopup().then(() => this.callbacks.onFallback());
+    const rule = this.rule;
+    void navigation.dismissPopup().then(() => this.callbacks.onFallback(rule));
   }
 
   // ---- joining ------------------------------------------------------------------------
@@ -254,7 +280,8 @@ export class OnlinePopup extends BasePopup {
         this.started = true;
         const myStone: Stone = message.hostStone === BLACK ? WHITE : BLACK;
         sfx.win();
-        void navigation.dismissPopup().then(() => this.callbacks.onStart(link, myStone));
+        const rule = message.rule;
+        void navigation.dismissPopup().then(() => this.callbacks.onStart(link, myStone, rule));
       });
       link.onClose((reason) => {
         if (!this.started && this.status) this.status.text = reason;
