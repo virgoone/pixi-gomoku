@@ -41,6 +41,46 @@ function splitAmount(total: number, parts: number) {
 
 const wait = (seconds: number) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
+/** Honour the OS "reduce motion" setting: no screen shake or camera moves, fewer particles. */
+const reduceMotion = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+
+type Point = { x: number; y: number };
+
+/** Move `node` along a quadratic Bézier from its current position through `control` to `to`. */
+function arcTo(node: { x: number; y: number }, control: Point, to: Point, vars: gsap.TweenVars) {
+  // The start is read when the tween starts, so it works as a later step in a timeline.
+  const from = { x: node.x, y: node.y };
+  const t = { v: 0 };
+  return gsap.to(t, {
+    ...vars,
+    v: 1,
+    onStart: () => {
+      from.x = node.x;
+      from.y = node.y;
+    },
+    onUpdate: () => {
+      const u = 1 - t.v;
+      node.x = u * u * from.x + 2 * u * t.v * control.x + t.v * t.v * to.x;
+      node.y = u * u * from.y + 2 * u * t.v * control.y + t.v * t.v * to.y;
+    },
+  });
+}
+
+/** Timings (seconds) and strengths of the chest sequence; the knobs for tuning the show. */
+const SHOW = {
+  /** Pause after landing and after each upgrade. */
+  beat: 1.0,
+  /** Rattle before the burst. */
+  charge: 1.0,
+  /** Burst strength per tier (0..1): flash, shake, particle counts and the boom all scale with it. */
+  strength: [0.45, 0.6, 0.8, 1] as const,
+  /** Peak of the radial bloom at full strength (never above 0.8). */
+  bloom: 0.75,
+  /** Screen shake amplitude (px) and camera push (scale) at full strength. */
+  shake: 14,
+  push: 0.07,
+};
+
 /**
  * The settlement screen. A win drops a chest that upgrades tier by tier, opens
  * on tap and throws out reward cards (modelled on the reference animation). A
@@ -49,6 +89,8 @@ const wait = (seconds: number) => new Promise((resolve) => setTimeout(resolve, s
 export class ResultScreen extends Container {
   private settlement: Settlement;
   private backdrop: Backdrop;
+  /** Everything the camera moves (shake, push); the HUD, cards and buttons stay put. */
+  private world = new Container();
   private stage = new Container();
   private ring = new Sprite(tex('ring'));
   private flash = new Sprite(tex('glow'));
@@ -121,15 +163,19 @@ export class ResultScreen extends Container {
     this.stage.addChild(this.ring, this.burstRing);
     if (win) {
       this.chest = new Chest(tier);
-      this.stage.addChild(this.chest);
+      this.chest.setGlow(TIERS[tier].glow);
     } else {
       this.badge = new Sprite(tex(this.settlement.kind === 'draw' ? 'badge-bronze' : 'badge-silver'));
       this.badge.anchor.set(0.5, 1);
-      this.stage.addChild(this.badge);
     }
-    this.stage.addChild(this.flash);
 
-    this.addChild(this.backdrop, this.stage, this.eyebrow, this.heading, this.detail, this.tapHint, this.fx, this.cardsLayer, this.buttonsLayer, this.confetti, this.hud);
+    // The flash sits behind the chest: its light spills round the edges, never over the front.
+    this.stage.addChild(this.flash);
+    if (this.chest) this.stage.addChild(this.chest);
+    if (this.badge) this.stage.addChild(this.badge);
+    if (reduceMotion) this.fx.density = 0.5;
+    this.world.addChild(this.backdrop, this.stage, this.eyebrow, this.heading, this.detail, this.tapHint, this.fx);
+    this.addChild(this.world, this.cardsLayer, this.buttonsLayer, this.confetti, this.hud);
     this.eventMode = 'static';
     this.on('pointertap', () => this.onTap());
     window.addEventListener('keydown', this.keyHandler);
@@ -190,6 +236,8 @@ export class ResultScreen extends Container {
   resize(width: number, height: number) {
     this.w = width;
     this.h = height;
+    this.world.pivot.set(width / 2, height / 2);
+    this.world.position.set(width / 2, height / 2);
     const textScale = Math.min(1, width / 460, height / 760);
     const uiScale = Math.min(1, width / 520, height / 820);
     const hudScale = Math.min(1, (width - 24) / (this.hud.totalWidth + 20));
@@ -221,6 +269,7 @@ export class ResultScreen extends Container {
     this.flash.y = -110 * scale;
     this.flash.width = this.flash.height = 560 * scale;
     this.tapHint.scale.set(textScale);
+    this.tapHintScale = textScale;
     this.tapHint.position.set(width / 2, this.floor + 48 * scale + 18);
     this.cardsLayer.scale.set(uiScale);
     this.cardsLayer.position.set(width / 2, this.floor + (40 + 75) * uiScale);
@@ -244,6 +293,7 @@ export class ResultScreen extends Container {
   }
 
   private textScale = 1;
+  private tapHintScale = 1;
 
   private fitHeading(textScale = this.textScale) {
     this.textScale = textScale;
@@ -288,7 +338,7 @@ export class ResultScreen extends Container {
     void this.popText(this.eyebrow);
     void this.setHeading(TIERS[0].name, TIERS[0].title);
 
-    // Falls from above, through the title, and lands with a squash.
+    // 1. Ready: falls from above, through the title, and lands with a squash.
     chest.y = -this.floor - 240 * scale;
     await gsap.to(chest, { y: 0, duration: 0.42, ease: 'power2.in' });
     if (this.destroyed) return;
@@ -297,75 +347,133 @@ export class ResultScreen extends Container {
     void chest.land();
     const ground = chest.toGlobal({ x: 0, y: -10 });
     this.fx.ring(ground.x, ground.y, { from: 60 * scale, to: 220 * scale, width: 3, duration: 0.5, alpha: 0.7 });
-    // "Tap to open" shows from the start, as in the reference.
+    // "Tap to open" shows from the start; a tap during the upgrades hurries them along.
     this.tapHint.alpha = 0;
     gsap.to(this.tapHint, { alpha: 1, duration: 0.3 });
-    const hintTween = gsap.to(this.tapHint.scale, { x: this.tapHint.scale.x * 1.08, y: this.tapHint.scale.y * 1.08, duration: 0.55, yoyo: true, repeat: -1, ease: 'sine.inOut' });
+    this.hintTween = gsap.to(this.tapHint.scale, { x: this.tapHintScale * 1.08, y: this.tapHintScale * 1.08, duration: 0.55, yoyo: true, repeat: -1, ease: 'sine.inOut' });
     this.acceptEarlyTap = true;
     this.twinkling = true;
     this.cursor = 'pointer';
-    await this.pause(1.0);
+    chest.startIdle(false);
+    await this.pause(SHOW.beat);
     if (this.destroyed) return;
 
-    // Upgrade one tier at a time: crouch, hop, white-hot flash with a shock ring, land.
+    // 2. Upgrade one tier at a time: leap, spin in the air, flash at the top, slam down.
     for (let tier = 1; tier <= finalTier; tier += 1) {
-      await chest.hop();
+      chest.stopIdle();
+      sfx.jump();
+      gsap.delayedCall(0.3, () => void (this.destroyed || sfx.spin()));
+      await chest.hop(90);
       if (this.destroyed) return;
       this.upgradeFlash(tier as TierId);
       await chest.drop();
       if (this.destroyed) return;
-      await this.pause(1.1);
+      sfx.land();
+      chest.startIdle(false);
+      await this.pause(SHOW.beat);
       if (this.destroyed) return;
     }
 
     if (!this.tapQueued) {
+      chest.startIdle(true);
       await new Promise<void>((resolve) => {
         this.waitingForTap = resolve;
       });
       this.waitingForTap = null;
     }
     if (this.destroyed) return;
+    // From here on taps are ignored until the collect button shows.
     this.acceptEarlyTap = false;
     this.twinkling = false;
     this.cursor = 'default';
-    hintTween.kill();
-    gsap.to(this.tapHint, { alpha: 0, duration: 0.2 });
+    chest.stopIdle();
+    this.stopHint();
 
-    // Charge: violent rattle with speed lines streaking out.
-    sfx.charge();
+    // 3. Charge: a rattle that grows violent, sparks sucked in, light leaking out, rising pitch.
+    const strength = SHOW.strength[finalTier];
+    const glow = TIERS[finalTier].glow;
+    sfx.charge(SHOW.charge);
     const center = this.chestCenter;
-    const lines = window.setInterval(() => {
-      if (!this.destroyed) this.fx.speedLines(center.x, center.y, 170 * scale, 3);
-    }, 45);
-    await chest.shake(0.8);
-    window.clearInterval(lines);
+    const suction = window.setInterval(() => {
+      if (!this.destroyed) this.fx.suck(center.x, center.y, 230 * scale, 3, glow);
+    }, 60);
+    await chest.charge(SHOW.charge, reduceMotion);
+    window.clearInterval(suction);
     if (this.destroyed) return;
 
-    // Burst open behind a full-screen flash.
-    this.fx.screenFlash(this.w, this.h, 0.9);
-    sfx.open();
-    say(`chest${finalTier}`, { delay: 0.3 });
-    this.backdrop.setRays({ alpha: 0.9, scale: this.backdrop.rays.scale.x * 1.3 }, 0.6);
+    // 4. Burst: bloom from the chest, shake and push, layered shock waves, streaks, sparks and loot.
+    this.burst(finalTier, strength);
     const opening = chest.open();
-    const mouth = chest.toGlobal(chest.mouth);
-    const far = Math.hypot(this.w, this.h) * 0.75;
-    for (const [index, width] of [5, 3, 2].entries()) {
-      this.fx.ring(center.x, center.y, { from: 80 * scale, to: far, width, duration: 1.1, delay: 0.12 + index * 0.14, alpha: 0.85 });
-    }
-    window.setTimeout(() => {
-      if (this.destroyed) return;
-      this.fx.loot(mouth.x, mouth.y, 30, Math.min(1000, this.h * 1.2));
-      this.confetti.burst(mouth.x, mouth.y, 110, Math.min(1100, this.h * 1.3));
-    }, 140);
     this.eyebrow.text = '你获得了';
     void this.popText(this.eyebrow);
     await opening;
     if (this.destroyed) return;
-    await wait(0.25);
+    await wait(0.2);
     if (this.destroyed) return;
+    // 5. Reveal and settle.
     await this.showRewards(chest.toGlobal(chest.mouth));
     if (this.destroyed) return;
     this.showCollect();
+  }
+
+  private hintTween: gsap.core.Tween | null = null;
+
+  /** Stop the "tap" hint's pulse and put it back to rest before fading it out. */
+  private stopHint() {
+    this.hintTween?.kill();
+    this.hintTween = null;
+    gsap.killTweensOf(this.tapHint.scale);
+    this.tapHint.scale.set(this.tapHintScale);
+    gsap.to(this.tapHint, { alpha: 0, duration: 0.2 });
+  }
+
+  /** The instant the chest bursts open; everything scales with the tier. */
+  private burst(tier: TierId, strength: number) {
+    const scale = this.chestScale;
+    const center = this.chestCenter;
+    const mouth = this.chest ? this.chest.toGlobal(this.chest.mouth) : center;
+    const glow = TIERS[tier].glow;
+    const far = Math.hypot(this.w, this.h) * 0.7;
+    sfx.open(strength);
+    gsap.delayedCall(0.35, () => void (this.destroyed || sfx.fanfare(tier)));
+    // Only a bundled clip, and only on the beat: robotic speech over the fanfare sounds broken.
+    say(`chest${tier}`, { delay: 0.75, fallback: false, maxLate: 0.4 });
+
+    this.fx.flash(center.x, center.y, Math.max(this.w, this.h) * (0.6 + 0.4 * strength), { tint: 0xfff4d6, peak: SHOW.bloom * strength });
+    this.flashBurst(glow, 0.6 + 0.6 * strength);
+    this.camera(strength);
+    const waves = 1 + tier;
+    for (let index = 0; index < waves; index += 1) {
+      this.fx.shockwave(center.x, center.y, { from: 70 * scale, to: far * (0.55 + 0.45 * strength), color: glow, duration: 0.9 + index * 0.1, delay: index * 0.12, strength: 0.7 + 0.3 * strength });
+    }
+    this.fx.streaks(center.x, center.y, 200 * scale, 10 + tier * 8, [0xffffff, glow]);
+    this.fx.sparks(center.x, center.y, 14 + tier * 10, 700 * scale, [0xffffff, glow]);
+    this.backdrop.setRays({ alpha: 0.55 + 0.35 * strength, scale: this.backdrop.rays.scale.x * (1.1 + 0.2 * strength) }, 0.6);
+    gsap.delayedCall(0.1, () => {
+      if (this.destroyed) return;
+      this.fx.loot(mouth.x, mouth.y, 10 + tier * 8, Math.min(1000, this.h * 1.2) * (0.75 + 0.25 * strength));
+      // Confetti once, at the climax only: the legendary chest.
+      if (tier === 3) this.confetti.burst(mouth.x, mouth.y, reduceMotion ? 30 : 60, Math.min(1000, this.h * 1.2));
+    });
+  }
+
+  /** Screen shake plus a quick push toward the chest, then back. Skipped under reduced motion. */
+  private camera(strength: number) {
+    if (reduceMotion) return;
+    const world = this.world;
+    const home = { x: this.w / 2, y: this.h / 2 };
+    gsap.killTweensOf(world.position);
+    gsap.killTweensOf(world.scale);
+    const shake = gsap.timeline({ onComplete: () => void world.position.set(this.w / 2, this.h / 2) });
+    const steps = 10;
+    for (let i = 0; i < steps; i += 1) {
+      const k = SHOW.shake * strength * (1 - i / steps) ** 1.5;
+      shake.to(world.position, { x: home.x + (Math.random() - 0.5) * 2 * k, y: home.y + (Math.random() - 0.5) * 2 * k, duration: 0.035, ease: 'none' });
+    }
+    const push = 1 + SHOW.push * strength;
+    gsap.timeline({ onComplete: () => void world.scale.set(1) })
+      .to(world.scale, { x: push, y: push, duration: 0.12, ease: 'power3.out' })
+      .to(world.scale, { x: 1, y: 1, duration: 0.7, ease: 'elastic.out(1, 0.5)' });
   }
 
   /** The instant of an upgrade. */
@@ -375,14 +483,15 @@ export class ResultScreen extends Container {
     const scale = this.chestScale;
     const colors = TIERS[tier];
     const center = this.chestCenter;
-    chest.flashWhite();
-    sfx.upgrade();
+    void chest.flashWhite();
+    sfx.upgrade(tier);
     // Only with a real clip: synthesised speech for a one-word cheer sounds robotic.
-    say('upgrade', { delay: 0.15, fallback: false });
-    this.fx.ring(center.x, center.y, { from: 50 * scale, to: 330 * scale, width: 5, duration: 0.6 });
-    this.fx.ring(center.x, center.y, { from: 30 * scale, to: 240 * scale, width: 3, duration: 0.55, delay: 0.08 });
+    say('upgrade', { delay: 0.1, fallback: false, maxLate: 0.3 });
+    this.fx.shockwave(center.x, center.y, { from: 50 * scale, to: 300 * scale, color: colors.glow, duration: 0.6, strength: 0.8 });
+    this.fx.sparks(center.x, center.y, 8 + tier * 4, 420 * scale, [0xffffff, colors.glow]);
     this.flashBurst(colors.glow);
     chest.setTier(tier);
+    chest.setGlow(colors.glow);
     this.backdrop.setTexture(`backdrop-tier-${tier}`, 0.08);
     this.backdrop.setRays({ tint: colors.glow });
     this.ring.tint = colors.glow;
@@ -404,7 +513,11 @@ export class ResultScreen extends Container {
     if (this.destroyed) return;
     sfx.land();
     this.ringPulse();
-    gsap.to(badge, { rotation: 0.04, duration: 1.4, yoyo: true, repeat: -1, ease: 'sine.inOut' });
+    // A few settling sways, then still: nothing keeps wobbling on the finished screen.
+    gsap.timeline()
+      .to(badge, { rotation: 0.05, duration: 0.5, ease: 'sine.inOut' })
+      .to(badge, { rotation: -0.03, duration: 0.6, ease: 'sine.inOut' })
+      .to(badge, { rotation: 0, duration: 0.7, ease: 'sine.out' });
     await wait(0.3);
     if (this.destroyed) return;
     await this.showRewards(badge.toGlobal({ x: 0, y: -120 }));
@@ -417,9 +530,10 @@ export class ResultScreen extends Container {
     gsap.fromTo(this.ring.scale, { x: this.ring.scale.x * 0.8, y: this.ring.scale.y * 0.8 }, { x: this.ring.scale.x, y: this.ring.scale.y, duration: 0.5, ease: 'back.out(2)' });
   }
 
+  /** Coloured glow and ring behind the chest; `strength` > 1 for the burst. */
   private flashBurst(tint: number, strength = 1) {
     this.flash.tint = tint;
-    gsap.fromTo(this.flash, { alpha: 0.95 * Math.min(1, strength) }, { alpha: 0, duration: 0.6, ease: 'power2.out' });
+    gsap.fromTo(this.flash, { alpha: 0.8 }, { alpha: 0, duration: 0.6 * Math.max(1, strength), ease: 'power2.out' });
     const base = this.ring.scale.x;
     this.burstRing.tint = tint;
     gsap.fromTo(this.burstRing, { alpha: 1 }, { alpha: 0, duration: 0.7, ease: 'power2.out' });
@@ -482,36 +596,48 @@ export class ResultScreen extends Container {
       const tx = -total / 2 + cardWidth / 2 + index * (cardWidth + gap);
       const value = this.settlement.rewards[key];
       amount.text = '+0';
-      sfx.reward();
-      // Pops up out of the chest, then drops into its slot and counts up.
+      // The number appears when the card lands, so nothing reads "+0" mid-flight.
+      amount.alpha = 0;
+      sfx.pop();
+      // Flies out of the chest on an arc, lands with an overshoot and a wobble, then counts up.
       const tl = gsap.timeline();
+      const control = { x: origin.x + (tx - origin.x) * 0.5 + (index - (entries.length - 1) / 2) * 60, y: Math.min(origin.y, 0) - 260 };
       tl.to(card, { alpha: 1, duration: 0.08 });
-      tl.to(card, { y: origin.y - 150, duration: 0.3, ease: 'power2.out' }, 0);
-      tl.to(card.scale, { x: 0.85, y: 0.85, duration: 0.3, ease: 'power2.out' }, 0);
-      tl.fromTo(card, { rotation: (index - 1) * 0.25 }, { rotation: 0, duration: 0.6 }, 0);
-      tl.to(card, { x: tx, y: 0, duration: 0.34, ease: 'power2.in' }, 0.3);
-      tl.to(card.scale, { x: 1, y: 1, duration: 0.34 }, 0.3);
-      tl.to(card.scale, { x: 1.12, y: 0.86, duration: 0.07 });
-      tl.to(card.scale, { x: 1, y: 1, duration: 0.4, ease: 'elastic.out(1, 0.45)' });
+      tl.add(arcTo(card, control, { x: tx, y: 0 }, { duration: 0.55, ease: 'power1.inOut' }), 0);
+      tl.to(card.scale, { x: 1.05, y: 1.05, duration: 0.55, ease: 'power2.out' }, 0);
+      tl.fromTo(card, { rotation: (index - 1) * 0.5 - 0.3 }, { rotation: 0.14 * (index % 2 ? 1 : -1), duration: 0.55, ease: 'power1.inOut' }, 0);
+      tl.to(card.scale, { x: 1.16, y: 0.84, duration: 0.07, ease: 'power2.out' });
+      tl.to(card.scale, { x: 1, y: 1, duration: 0.5, ease: 'elastic.out(1, 0.4)' });
+      tl.to(card, { rotation: 0, duration: 0.6, ease: 'elastic.out(1.2, 0.35)' }, '<');
       tl.add(() => {
         if (this.destroyed) return;
         sfx.coin();
+        gsap.fromTo(amount, { alpha: 0 }, { alpha: 1, duration: 0.1 });
+        gsap.fromTo(amount.scale, { x: 0.5, y: 0.5 }, { x: 1, y: 1, duration: 0.35, ease: 'back.out(3)' });
         const counter = { v: 0 };
+        let lastTick = 0;
+        let step = 0;
         gsap.to(counter, {
           v: value,
-          duration: Math.min(0.7, 0.25 + value / 2000),
+          duration: Math.min(0.8, 0.3 + value / 2000),
           ease: 'power1.out',
           onUpdate: () => {
-            if (!amount.destroyed) amount.text = `+${Math.round(counter.v).toLocaleString('en-US')}`;
+            if (amount.destroyed) return;
+            amount.text = `+${Math.round(counter.v).toLocaleString('en-US')}`;
+            const now = performance.now();
+            if (now - lastTick > 55 && Math.round(counter.v) < value) {
+              lastTick = now;
+              sfx.tick(step++);
+            }
           },
         });
         if (special) {
           const at = card.toGlobal({ x: 0, y: 0 });
-          this.fx.ring(at.x, at.y, { from: 60 * this.cardsLayer.scale.x, to: 130 * this.cardsLayer.scale.x, width: 4, color: 0xfff3a0, duration: 0.6 });
+          this.fx.shockwave(at.x, at.y, { from: 60 * this.cardsLayer.scale.x, to: 140 * this.cardsLayer.scale.x, color: 0xfff3a0, duration: 0.6, strength: 0.8 });
           const tag = card.children.at(-1);
           if (tag) gsap.fromTo(tag.scale, { x: 0, y: 0 }, { x: 1, y: 1, duration: 0.4, ease: 'back.out(3)' });
         }
-      }, 0.64);
+      }, 0.62);
       await wait(this.hurry ? 0.3 : 0.42);
       if (this.destroyed) return;
     }
@@ -564,8 +690,10 @@ export class ResultScreen extends Container {
             .set(icon, { alpha: 1 })
             .to(icon, { x: scatter.x, y: scatter.y, duration: 0.28, ease: 'power2.out' })
             .to(icon, { rotation: (Math.random() - 0.5) * 1.2, duration: 0.28 }, '<')
-            .to(icon, { x: target.x, y: target.y, rotation: 0, duration: 0.5, ease: 'power2.in' }, '+=0.08')
-            .to(icon.scale, { x: base * 0.6, y: base * 0.6, duration: 0.5, ease: 'power2.in' }, '<')
+            // Then curves up and over into its HUD counter.
+            .add(arcTo(icon, { x: scatter.x + (target.x - scatter.x) * 0.3, y: Math.min(scatter.y, target.y) - 120 }, target, { duration: 0.55, ease: 'power2.in' }), '+=0.08')
+            .to(icon, { rotation: 0, duration: 0.55 }, '<')
+            .to(icon.scale, { x: base * 0.6, y: base * 0.6, duration: 0.55, ease: 'power2.in' }, '<')
             .add(() => {
               sfx.coin();
               this.hud.bump(REWARD_META[key].currency, share);
@@ -652,7 +780,7 @@ export class ResultScreen extends Container {
     this.backdrop.update(ticker);
     this.confetti.update(ticker);
     this.fx.update(ticker);
-    this.chest?.pulseGlow(this.time);
+    this.chest?.tick(this.time);
     if (this.twinkling && this.chest) {
       this.twinkleClock += ticker.deltaMS / 1000;
       while (this.twinkleClock > 0.12) {

@@ -1,0 +1,89 @@
+{
+  "lines": {
+    "win": {
+      "text": "漂亮，你赢了！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "65dc433438d2",
+      "bytes": 11952
+    },
+    "winResign": {
+      "text": "对手认输啦，你赢了！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "22d71220842c",
+      "bytes": 14544
+    },
+    "lose": {
+      "text": "差一点点，再来一局吧。",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "87288d772497",
+      "bytes": 16416
+    },
+    "loseResign": {
+      "text": "没关系，下一局再来。",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "82762a789dc3",
+      "bytes": 14976
+    },
+    "draw": {
+      "text": "平局，棋逢对手。",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "c466b1d531a8",
+      "bytes": 15696
+    },
+    "blackWins": {
+      "text": "五子连珠，黑棋赢了！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "0a52e5035420",
+      "bytes": 15120
+    },
+    "whiteWins": {
+      "text": "五子连珠，白棋赢了！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "bdd8b9e7a036",
+      "bytes": 15552
+    },
+    "blackWinsResign": {
+      "text": "黑棋赢了，对方认输。",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "1282da822731",
+      "bytes": 15264
+    },
+    "whiteWinsResign": {
+      "text": "白棋赢了，对方认输。",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "2919d337c884",
+      "bytes": 15264
+    },
+    "upgrade": {
+      "text": "升级！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "0fbe99f7191c",
+      "bytes": 11232
+    },
+    "chest0": {
+      "text": "哇，是普通宝箱！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "d2fca81d38ab",
+      "bytes": 14400
+    },
+    "chest1": {
+      "text": "哇，是稀有宝箱！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "205dbbe5c1e9",
+      "bytes": 14256
+    },
+    "chest2": {
+      "text": "哇，是史诗宝箱！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "1b21ff6e88e4",
+      "bytes": 13968
+    },
+    "chest3": {
+      "text": "哇，是传说宝箱！",
+      "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz",
+      "fingerprint": "f2a03df910ea",
+      "bytes": 14400
+    }
+  },
+  "voiceId": "edge:zh-CN-XiaoyiNeural|+6%|+0Hz"
+}

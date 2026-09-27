@@ -1,6 +1,7 @@
 /**
- * Every spoken line in the game. `npm run voice` renders each one with Fish
- * Audio TTS into public/voice/<id>.mp3; the game plays those clips and falls
+ * Every spoken line in the game. `npm run voice:edge` (Edge neural TTS, the
+ * shipped clips) or `npm run voice` (Fish Audio TTS) renders each one into
+ * public/voice/<id>.mp3; the game plays those clips and falls
  * back to the browser's speech synthesis (with the same text) when a clip is
  * missing. Keep this file free of imports so the Node script can load it.
  */
@@ -23,5 +24,5 @@ export const VOICE_LINES = {
 
 export type VoiceLineId = keyof typeof VOICE_LINES;
 
-/** The Fish Audio voice used for the bundled clips: "萝莉萌妹", a sweet, cute public voice. */
+/** The Fish Audio voice `npm run voice` uses: "萝莉萌妹", a sweet, cute public voice. */
 export const DEFAULT_VOICE_ID = 'f82e3885ac22468eb6c773b96f2c5752';
