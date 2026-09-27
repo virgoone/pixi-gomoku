@@ -1,4 +1,5 @@
 import { Application } from 'pixi.js';
+import { initAnalytics } from './app/analytics';
 
 import { navigation } from './app/navigation';
 import { account } from './net/account';
@@ -6,6 +7,7 @@ import { HomeScreen } from './screens/HomeScreen';
 import { LoadScreen } from './screens/LoadScreen';
 
 async function boot() {
+  initAnalytics();
   const app = new Application();
   await app.init({
     resizeTo: window,

@@ -32,7 +32,7 @@
 
 变量作用域选 Functions（或 All scopes），Production 和 Deploy Previews 都要有，否则预览环境登录会 500。免费套餐不支持细分作用域时使用 All scopes。生产和预览使用不同 AUTH_SECRET。
 
-当前站点复用 meme 的 Resend Key 和已验证域名 `no-reply.douni.one`，`EMAIL_FROM` 为 `五子棋 <info@no-reply.douni.one>`，`ADMIN_EMAILS` 为 `w2008second@gmail.com`。密钥仅在 Netlify 环境变量中，不提交到 Git。
+自行部署时使用自己的 Resend Key、已验证发信域名与管理员邮箱。密钥仅放在 Netlify 环境变量中，不提交到 Git。
 
 ### 2.2 Resend 发信域名
 

@@ -2,6 +2,7 @@ import { Container, Sprite, type Text, type Ticker } from 'pixi.js';
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
+import { trackGameEnd, trackGameStart } from '../app/analytics';
 import { say } from '../app/voice';
 import type { VoiceLineId } from '../app/voiceLines';
 import { navigation } from '../app/navigation';
@@ -51,6 +52,7 @@ export class GameScreen extends Container {
   private token = 0;
   private unsubscribers: Array<() => void> = [];
   private ended = false;
+  private trackedStart = false;
   /** The opponent walked out, so leaving now costs the player nothing. */
   private opponentGone = false;
   private w = 0;
@@ -125,6 +127,10 @@ export class GameScreen extends Container {
   // ---- flow ---------------------------------------------------------------------------
 
   async show() {
+    if (!this.trackedStart) {
+      this.trackedStart = true;
+      trackGameStart(this.config.mode, this.config.mode === 'ai' ? this.config.brain : undefined);
+    }
     this.alpha = 0;
     gsap.to(this, { alpha: 1, duration: 0.3 });
     await gsap.from(this.board.scale, { x: 0.85, y: 0.85, duration: 0.4, ease: 'back.out(1.8)' });
@@ -278,6 +284,7 @@ export class GameScreen extends Container {
       moves: this.game.history.map((move) => [move.x, move.y] as [number, number]),
       resignedBy: reason === 'resign' && winner !== null ? opponent(winner) : undefined,
     };
+    trackGameEnd(outcome);
     const delay = line ? 1800 : 900;
     window.setTimeout(() => {
       if (this.destroyed) return;

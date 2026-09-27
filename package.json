@@ -2,8 +2,9 @@
   "name": "pixi-gomoku",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
-  "description": "五子棋 · PixiJS game with SVG-drawn UI, AI opponents, online rooms and a chest-opening result screen.",
+  "description": "Open-source PixiJS Gomoku built with Claude Code and Opus: AI opponents, WebRTC multiplayer, animated rewards and cross-device saves.",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json && vite build",

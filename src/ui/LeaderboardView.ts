@@ -2,6 +2,7 @@ import { Assets, Container, Graphics, NineSliceSprite, Sprite, type Text, type T
 import gsap from 'gsap';
 
 import { tex } from '../app/textures';
+import { trackLeaderboardView } from '../app/analytics';
 import emptyBoardUrl from '../assets/leaderboard-empty.png';
 import { account, type ApiError, type Board, BoardFeed, type BoardEntry } from '../net/account';
 import { INK } from '../svg/palette';
@@ -94,6 +95,7 @@ export class LeaderboardView extends Container {
 
   /** Start live updates (the tab became visible). */
   async activate() {
+    if (!this.active) trackLeaderboardView();
     this.active = true;
     if (!account.known || !account.available) await account.refresh();
     if (!this.active || this.destroyed) return;
