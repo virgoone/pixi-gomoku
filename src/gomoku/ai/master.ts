@@ -13,6 +13,8 @@ export type EngineState = { status: EngineStatus; progress: number; error?: stri
 export const MASTER_TIME_MS = 1000;
 /** A move that takes far longer than the limit means the engine is stuck. */
 const THINK_TIMEOUT_MS = MASTER_TIME_MS * 8;
+/** A download (or engine start) that makes no progress this long has stalled. */
+const LOAD_STALL_MS = 20_000;
 
 type Pending = { resolve: (point: Point) => void; reject: (error: Error) => void; timer: number };
 
@@ -47,14 +49,27 @@ class MasterEngine {
         return;
       }
       this.worker = worker;
+      // Without a watchdog a stalled download would leave callers of think() (e.g. a replay
+      // that skips the setup popup) waiting forever, since the move timer starts after loading.
+      let stall = 0;
+      const watch = () => {
+        window.clearTimeout(stall);
+        stall = window.setTimeout(() => reject(new Error('引擎下载超时')), LOAD_STALL_MS);
+      };
+      watch();
       worker.onmessage = (event: MessageEvent) => {
         const message = event.data;
-        if (message.type === 'progress') this.setState({ status: 'loading', progress: message.value });
-        else if (message.type === 'ready') {
+        if (message.type === 'progress') {
+          watch();
+          this.setState({ status: 'loading', progress: message.value });
+        } else if (message.type === 'ready') {
+          window.clearTimeout(stall);
           this.setState({ status: 'ready', progress: 1 });
           resolve();
-        } else if (message.type === 'error') reject(new Error(message.message));
-        else if (message.type === 'move') this.settle(message.id, { x: message.x, y: message.y });
+        } else if (message.type === 'error') {
+          window.clearTimeout(stall);
+          reject(new Error(message.message));
+        } else if (message.type === 'move') this.settle(message.id, { x: message.x, y: message.y });
         else if (message.type === 'failed') this.settle(message.id, new Error(message.message));
       };
       worker.onerror = (event) => {
