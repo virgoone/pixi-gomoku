@@ -70,6 +70,7 @@ export class GameScreen extends Container {
     this.modeBar = new TabBar([{ id: 'mode', text: this.modeText(), icon: this.modeIcon() }], 'mode');
 
     this.board.onCell = (point) => this.onLocalMove(point);
+    this.board.onTouchPreviewChange = () => this.updateStatus();
     this.addChild(this.backdrop, this.boardGlow, this.board, this.status, this.undoButton, this.resignButton, this.modeBar, this.menu);
     this.setupPlayers();
     if (config.mode === 'ai') this.ai = new AiPlayer(config.brain);
@@ -135,6 +136,7 @@ export class GameScreen extends Container {
 
   private nextTurn() {
     if (this.ended) return;
+    this.board.hideGhost();
     const turn = this.game.turn;
     const seat = this.seatOf(turn);
     this.board.turnStone = turn;
@@ -142,15 +144,22 @@ export class GameScreen extends Container {
     for (const [stone, card] of this.cards) card.setActive(stone === turn, stone === turn && seat === 'ai');
     for (const [stone, card] of this.cards) if (!(stone === turn && seat === 'ai')) card.setStatus(this.describe(stone).subtitle);
 
-    if (this.config.mode === 'local') this.status.text = `轮到${stoneName(turn)}`;
-    else if (seat === 'human') this.status.text = `轮到你了 · ${stoneName(turn)}`;
-    else if (seat === 'ai') this.status.text = `${this.describe(turn).name}正在思考`;
-    else this.status.text = `等待${this.describe(turn).name}落子`;
-
+    this.updateStatus();
     gsap.fromTo(this.status, { alpha: 0.3 }, { alpha: 1, duration: 0.3 });
     this.undoButton.setEnabled(this.canUndo());
     this.resignButton.setEnabled(!this.ended && (this.config.mode === 'local' || this.game.history.length > 0));
     if (seat === 'ai') void this.aiTurn();
+  }
+
+  private updateStatus() {
+    if (this.ended) return;
+    const turn = this.game.turn;
+    const seat = this.seatOf(turn);
+    if (seat === 'human' && this.board.hasTouchPreview) this.status.text = '再点一次落子';
+    else if (this.config.mode === 'local') this.status.text = `轮到${stoneName(turn)}`;
+    else if (seat === 'human') this.status.text = `轮到你了 · ${stoneName(turn)}`;
+    else if (seat === 'ai') this.status.text = `${this.describe(turn).name}正在思考`;
+    else this.status.text = `等待${this.describe(turn).name}落子`;
   }
 
   private async aiTurn() {
@@ -208,6 +217,7 @@ export class GameScreen extends Container {
 
   private askResign() {
     if (this.ended) return;
+    this.board.hideGhost();
     const config = this.config;
     const who = config.mode === 'local' ? `${stoneName(this.game.turn)}认输？` : '确定要认输吗？';
     void navigation.present(
@@ -309,6 +319,7 @@ export class GameScreen extends Container {
     const myStone = this.config.myStone;
     this.opponentGone = true;
     this.board.acceptingInput = false;
+    this.board.hideGhost();
     toast(this, reason, this.w);
     void navigation.present(
       new ConfirmPopup({
@@ -341,6 +352,7 @@ export class GameScreen extends Container {
   }
 
   private openMenu() {
+    this.board.hideGhost();
     const config = this.config;
     void navigation.present(
       new PausePopup({

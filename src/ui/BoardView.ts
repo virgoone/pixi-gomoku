@@ -39,6 +39,7 @@ export class BoardView extends Container {
   /** Colour of the ghost preview. */
   turnStone: Stone = BLACK;
   onCell: (point: Point) => void = () => undefined;
+  onTouchPreviewChange: () => void = () => undefined;
 
   constructor() {
     super();
@@ -49,12 +50,21 @@ export class BoardView extends Container {
 
     this.eventMode = 'static';
     this.on('pointermove', (event) => this.handleHover(event));
-    this.on('pointerleave', () => this.hideGhost());
+    this.on('pointerleave', (event) => {
+      // Touch pointers leave on finger lift, between preview and confirmation.
+      if (event.pointerType !== 'touch') this.hideGhost();
+    });
+    this.on('pointerupoutside', () => this.hideGhost());
+    this.on('pointercancel', () => this.hideGhost());
     this.on('pointertap', (event) => this.handleTap(event));
   }
 
   get boardPixelSize() {
     return this.pixelSize;
+  }
+
+  get hasTouchPreview() {
+    return this.pendingTouch !== null;
   }
 
   layout(pixelSize: number) {
@@ -68,6 +78,7 @@ export class BoardView extends Container {
     this.drawGrid();
     for (const [index, node] of this.nodes) this.positionNode(node, index % this.size, Math.floor(index / this.size));
     this.ghost.width = this.ghost.height = this.cell * 0.9;
+    if (this.pendingTouch) this.showGhost(this.pendingTouch, 0.6);
     this.placeLastMarker();
   }
 
@@ -120,10 +131,10 @@ export class BoardView extends Container {
       if (!this.pendingTouch || this.pendingTouch.x !== point.x || this.pendingTouch.y !== point.y) {
         this.pendingTouch = point;
         this.showGhost(point, 0.6);
+        this.onTouchPreviewChange();
         return;
       }
     }
-    this.pendingTouch = null;
     this.hideGhost();
     this.onCell(point);
   }
@@ -136,8 +147,10 @@ export class BoardView extends Container {
   }
 
   hideGhost() {
+    const hadTouchPreview = this.hasTouchPreview;
     this.pendingTouch = null;
     this.ghost.alpha = 0;
+    if (hadTouchPreview) this.onTouchPreviewChange();
   }
 
   private positionNode(node: StoneNode, x: number, y: number) {
@@ -208,6 +221,7 @@ export class BoardView extends Container {
   }
 
   clear() {
+    this.hideGhost();
     for (const index of [...this.nodes.keys()]) this.removeStone(index % this.size, Math.floor(index / this.size));
     this.clearWin();
     this.setLastMove(null);
