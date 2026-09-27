@@ -100,13 +100,20 @@ export function preloadVoice() {
   for (const id of Object.keys(VOICE_LINES) as VoiceLineId[]) void loadClip(id);
 }
 
-/** Say one of the game's lines: the bundled clip if there is one, else speech synthesis. */
-export function say(id: VoiceLineId, options: { delay?: number; fallback?: boolean } = {}) {
+/**
+ * Say one of the game's lines: the bundled clip if there is one, else speech
+ * synthesis (unless `fallback` is false). A line cued to an animation beat sets
+ * `maxLate`: if the clip is not ready within that many seconds of its cue it is
+ * dropped rather than spoken over whatever the screen shows by then.
+ */
+export function say(id: VoiceLineId, options: { delay?: number; fallback?: boolean; maxLate?: number } = {}) {
   if (getProfile().muted) return;
   const token = ++lineToken;
   const run = async () => {
+    const cued = performance.now();
     const buffer = await loadClip(id);
     if (token !== lineToken || getProfile().muted) return;
+    if (options.maxLate !== undefined && (performance.now() - cued) / 1000 > options.maxLate) return;
     stopClip?.();
     synth?.cancel();
     if (buffer) stopClip = playClip(buffer, 1.1);
