@@ -54,6 +54,11 @@ describe('RIF opening messages', () => {
     expect(parseMessage({ type: 'offer', points: [[1, 2], [3, 15]] })).toBeNull();
     expect(parseMessage({ type: 'choose', x: 7, y: 8 })).toEqual({ type: 'choose', x: 7, y: 8 });
     expect(parseMessage({ type: 'choose', x: -1, y: 8 })).toBeNull();
+    expect(parseMessage({ type: 'delegate', on: true })).toEqual({ type: 'delegate', on: true });
+    expect(parseMessage({ type: 'delegate', on: 1 })).toBeNull();
+    expect(parseMessage({ type: 'undo-request', count: 2, index: 9 })).toEqual({ type: 'undo-request', count: 2, index: 9 });
+    expect(parseMessage({ type: 'undo-request', count: 3, index: 9 })).toBeNull();
+    expect(parseMessage({ type: 'undo-reply', accept: false })).toEqual({ type: 'undo-reply', accept: false });
   });
 
   it('drops each feature the guest cannot play', () => {

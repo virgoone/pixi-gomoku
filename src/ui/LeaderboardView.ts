@@ -4,7 +4,9 @@ import gsap from 'gsap';
 import { tex } from '../app/textures';
 import { trackLeaderboardView } from '../app/analytics';
 import emptyBoardUrl from '../assets/leaderboard-empty.png';
-import { account, type ApiError, type Board, BoardFeed, type BoardEntry } from '../net/account';
+import { navigation } from '../app/navigation';
+import { account, type ApiError, type Board, BoardFeed, type BoardEntry, type MasterRecord } from '../net/account';
+import { MasterRecordPopup } from '../popups/MasterRecordPopup';
 import { INK } from '../svg/palette';
 import { openRename, openSignIn } from './authDialog';
 import { Button } from './Button';
@@ -201,14 +203,20 @@ export class LeaderboardView extends Container {
     this.status.position.set(0, showArt ? center + size / 2 + 20 : center);
 
     const me = account.user?.id;
-    const count = this.visibleRows;
+    // The master's row is pinned on top whenever the board has loaded; it takes one row.
+    const master = account.user && this.board ? this.board.master ?? { wins: 0, losses: 0, draws: 0, challenges: 0, delegated: 0, recent: [] } : null;
+    if (master && entries.length) {
+      this.rows.addChild(this.makeMasterRow(master));
+    }
+    const offset = master && entries.length ? 1 : 0;
+    const count = this.visibleRows - offset;
     let shown = entries.slice(0, count).map((entry, index) => ({ entry, rank: index + 1 }));
     const myIndex = me ? entries.findIndex((e) => e.userId === me) : -1;
     // Always show the player's own row, replacing the last visible one if needed.
     if (myIndex >= count) shown = [...shown.slice(0, count - 1), { entry: entries[myIndex], rank: myIndex + 1 }];
     shown.forEach(({ entry, rank }, index) => {
       const row = this.makeRow(entry, rank, entry.userId === me);
-      row.y = index * ROW_H;
+      row.y = (index + offset) * ROW_H;
       this.rows.addChild(row);
       if (changed?.has(entry.userId)) {
         gsap.fromTo(row, { alpha: 0.2 }, { alpha: 1, duration: 0.5 });
@@ -216,6 +224,34 @@ export class LeaderboardView extends Container {
       }
     });
     this.renderFooter();
+  }
+
+  /** The master as a virtual player: not ranked, its record against players; tap for details. */
+  private makeMasterRow(record: MasterRecord) {
+    const width = this.w - 32;
+    const row = new Container();
+    const bg = new Graphics()
+      .roundRect(0, 2, width, ROW_H - 6, 14)
+      .fill({ color: 0xff6b5a, alpha: 0.16 })
+      .stroke({ color: 0xff8a6a, width: 2, alpha: 0.7 });
+    const avatar = new Sprite(tex('avatar-master'));
+    avatar.anchor.set(0.5);
+    avatar.width = avatar.height = 32;
+    avatar.position.set(24, ROW_H / 2 - 1);
+    const name = label('神龙棋仙 · 虚拟', 'button', { fontSize: 18, stroke: { color: INK, width: 4, join: 'round' } });
+    name.anchor.set(0, 0.5);
+    name.position.set(50, ROW_H / 2 - 1);
+    const recordText = label(`${record.wins} 胜 ${record.losses} 负`, 'small', { fontSize: 12, fill: 0xffd1c4 });
+    recordText.anchor.set(1, 0.5);
+    recordText.position.set(width - 104, ROW_H / 2 - 1);
+    const delegated = label(`托管 ${record.delegated}`, 'small', { fontSize: 13, fill: 0xffe98a, fontWeight: '700' });
+    delegated.anchor.set(1, 0.5);
+    delegated.position.set(width - 16, ROW_H / 2 - 1);
+    row.addChild(bg, avatar, name, recordText, delegated);
+    row.eventMode = 'static';
+    row.cursor = 'pointer';
+    row.on('pointertap', () => void navigation.present(new MasterRecordPopup(this.board?.master)));
+    return row;
   }
 
   private makeRow(entry: BoardEntry, rank: number, mine: boolean) {

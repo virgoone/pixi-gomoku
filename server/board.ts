@@ -32,11 +32,20 @@ export type Player = {
   /** Keep periodic save synchronization from undoing an admin removal. */
   removed?: boolean;
   /** Recorded atomically with totals: retries and other devices cannot double-credit a game. */
-  games?: Record<string, { result: 'win' | 'loss' | 'draw'; points: number; finishedAt: number }>;
+  games?: Record<string, { result: 'win' | 'loss' | 'draw'; points: number; finishedAt: number; delegated?: boolean }>;
 };
 
 export type BoardEntry = Pick<Player, 'userId' | 'name' | 'points' | 'wins' | 'losses' | 'draws' | 'bestStreak'>;
-export type Board = { version: number; updatedAt: number; entries: BoardEntry[] };
+/** One game in the master's public record, from the master's side. */
+export type MasterGame = { kind: 'challenge' | 'delegate'; result: 'win' | 'loss' | 'draw'; name: string | null; finishedAt: number };
+/**
+ * The master (神龙棋仙) as a virtual player: its results against people who
+ * challenged it, and the games it played for people who handed their seat to
+ * it (托管). Kept on the board document so the board's version covers it.
+ */
+export type MasterRecord = { wins: number; losses: number; draws: number; challenges: number; delegated: number; recent: MasterGame[] };
+export const MASTER_RECENT = 10;
+export type Board = { version: number; updatedAt: number; entries: BoardEntry[]; master?: MasterRecord };
 
 export type GameSubmission = {
   mode: 'ai' | 'online';
@@ -45,6 +54,10 @@ export type GameSubmission = {
   moves: Array<[number, number]>;
   /** Which colour resigned, if the game ended by resignation. */
   resigned?: Stone | null;
+  /** The master played (some of) the player's moves: the game is the master's, not theirs. */
+  delegated?: boolean;
+  /** The player lets the master's record show their name. */
+  showName?: boolean;
 };
 
 export class BoardError extends Error {
@@ -80,7 +93,7 @@ export function parseSubmission(body: unknown): GameSubmission & { gameId: strin
     }
     clean.push([move[0], move[1]]);
   }
-  return { mode, brain, myStone, moves: clean, resigned, gameId: b.gameId, finishedAt: b.finishedAt };
+  return { mode, brain, myStone, moves: clean, resigned, gameId: b.gameId, finishedAt: b.finishedAt, delegated: b.delegated === true, showName: b.showName === true };
 }
 
 /** Replay the game with the real rules and decide the player's result. */
@@ -157,7 +170,7 @@ async function updateBoard(kv: KV, change: (entries: BoardEntry[]) => BoardEntry
     const board = current?.value ?? { version: 0, updatedAt: 0, entries: [] };
     const entries = rankEntries(await change(board.entries.map((e) => ({ ...e }))));
     if (JSON.stringify(entries) === JSON.stringify(board.entries)) return board;
-    const next: Board = { version: board.version + 1, updatedAt: now, entries };
+    const next: Board = { ...board, version: board.version + 1, updatedAt: now, entries };
     const written = current ? await kv.set('board', next, { onlyIfMatch: current.etag }) : await kv.set('board', next, { onlyIfNew: true });
     if (written) return next;
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 60 * (attempt + 1)));
@@ -205,6 +218,8 @@ function streaks(games: NonNullable<Player['games']>) {
   // Offline devices can upload out of order. Use completion time, not upload order.
   const sorted = Object.entries(games).sort(([a, ga], [b, gb]) => ga.finishedAt - gb.finishedAt || a.localeCompare(b));
   for (const [, game] of sorted) {
+    // 托管 games are the master's, not the player's.
+    if (game.delegated) continue;
     if (game.result === 'win') streak += 1;
     else if (game.result === 'loss') streak = 0;
     bestStreak = Math.max(bestStreak, streak);
@@ -228,16 +243,19 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
       return { result: receipt.result, points: receipt.points, duplicate: true, player: publicPlayer(await withAccountProgress(kv, player)), rank: rankOf(board, user.id), version: board.version };
     }
     if (now - player.lastSubmitAt < SUBMIT_INTERVAL_MS) throw new BoardError(429, 'too_fast', '提交太频繁，稍后再试');
-    const points = ladderPoints(result, game.mode, game.brain);
-    const games = { ...player.games, [game.gameId]: { result, points, finishedAt: Math.min(game.finishedAt, now) } };
+    // A 托管 game is still verified and receipted (no double submits) but earns the player nothing.
+    const delegated = Boolean(game.delegated);
+    const points = delegated ? 0 : ladderPoints(result, game.mode, game.brain);
+    const counted = delegated ? null : result;
+    const games = { ...player.games, [game.gameId]: { result, points, finishedAt: Math.min(game.finishedAt, now), ...(delegated ? { delegated } : {}) } };
     const { streak, bestStreak } = streaks(games);
     const next: Player = {
       ...player,
       name: user.name,
       points: player.points + points,
-      wins: player.wins + (result === 'win' ? 1 : 0),
-      losses: player.losses + (result === 'loss' ? 1 : 0),
-      draws: player.draws + (result === 'draw' ? 1 : 0),
+      wins: player.wins + (counted === 'win' ? 1 : 0),
+      losses: player.losses + (counted === 'loss' ? 1 : 0),
+      draws: player.draws + (counted === 'draw' ? 1 : 0),
       streak,
       bestStreak,
       games,
@@ -247,10 +265,45 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
     };
     const written = current ? await kv.set(key, next, { onlyIfMatch: current.etag }) : await kv.set(key, next, { onlyIfNew: true });
     if (!written) continue;
-    const board = await publishPlayer(kv, user.id, now);
+    let board = await publishPlayer(kv, user.id, now);
+    const masterGame = masterGameOf(game, result, user.name, Math.min(game.finishedAt, now));
+    if (masterGame) board = await recordMaster(kv, masterGame, now);
     return { result, points, duplicate: false, player: publicPlayer(await withAccountProgress(kv, next)), rank: rankOf(board, user.id), version: board.version };
   }
   throw new BoardError(503, 'busy', '请稍后再试');
+}
+
+const flip = { win: 'loss', loss: 'win', draw: 'draw' } as const;
+
+/** The game as the master's record sees it, if the master took part. */
+export function masterGameOf(game: GameSubmission, result: 'win' | 'loss' | 'draw', name: string, finishedAt: number): MasterGame | null {
+  const shown = game.showName ? name : null;
+  // 托管: the master played the player's side, so their result is its result.
+  if (game.delegated) return { kind: 'delegate', result, name: shown, finishedAt };
+  // A challenge: the player beat (or lost to) the master.
+  if (game.mode === 'ai' && game.brain === 'master') return { kind: 'challenge', result: flip[result], name: shown, finishedAt };
+  return null;
+}
+
+async function recordMaster(kv: KV, entry: MasterGame, now: number): Promise<Board> {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const current = await kv.get<Board>('board');
+    const board = current?.value ?? { version: 0, updatedAt: 0, entries: [] };
+    const record = board.master ?? { wins: 0, losses: 0, draws: 0, challenges: 0, delegated: 0, recent: [] };
+    const master: MasterRecord = {
+      wins: record.wins + (entry.result === 'win' ? 1 : 0),
+      losses: record.losses + (entry.result === 'loss' ? 1 : 0),
+      draws: record.draws + (entry.result === 'draw' ? 1 : 0),
+      challenges: record.challenges + (entry.kind === 'challenge' ? 1 : 0),
+      delegated: record.delegated + (entry.kind === 'delegate' ? 1 : 0),
+      recent: [entry, ...record.recent].slice(0, MASTER_RECENT),
+    };
+    const next: Board = { ...board, version: board.version + 1, updatedAt: now, master };
+    const written = current ? await kv.set('board', next, { onlyIfMatch: current.etag }) : await kv.set('board', next, { onlyIfNew: true });
+    if (written) return next;
+    await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 60 * (attempt + 1)));
+  }
+  throw new BoardError(503, 'busy', '排行榜正忙，请稍后再试');
 }
 
 /** Keep the player's board name in step with a rename. */

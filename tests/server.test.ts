@@ -193,6 +193,41 @@ describe('leaderboard', () => {
     expect(a2.player).toMatchObject({ losses: 1, streak: 0, bestStreak: 1 });
   });
 
+  it('gives a 托管 game to the master, not the player', async () => {
+    const env = makeEnv();
+    const alice = (await signIn(env, 'alice@example.com', 'Alice')).user;
+    const t0 = Date.now();
+    const gameId = crypto.randomUUID();
+    const won = await submitGame(env.board, alice, { gameId, mode: 'online', myStone: 1, moves: BLACK_FIVE, delegated: true, showName: true }, t0);
+    expect(won).toMatchObject({ result: 'win', points: 0, duplicate: false });
+    expect(won.player).toMatchObject({ points: 0, wins: 0, losses: 0, streak: 0 });
+    const board = await readBoard(env.board);
+    expect(board.master).toMatchObject({ wins: 1, losses: 0, delegated: 1, challenges: 0 });
+    expect(board.master?.recent[0]).toMatchObject({ kind: 'delegate', result: 'win', name: 'Alice' });
+    // Resubmitting the same game changes nothing.
+    const again = await submitGame(env.board, alice, { gameId, mode: 'online', myStone: 1, moves: BLACK_FIVE, delegated: true }, t0 + SUBMIT_INTERVAL_MS);
+    expect(again).toMatchObject({ duplicate: true });
+    expect(again.player).toMatchObject({ wins: 0 });
+    expect((await readBoard(env.board)).master).toMatchObject({ wins: 1, delegated: 1 });
+  });
+
+  it('records challenges against the master from its side, hiding names by default', async () => {
+    const env = makeEnv();
+    const bob = (await signIn(env, 'bob@example.com', 'Bob')).user;
+    const t0 = Date.now();
+    // Bob (white) loses to the master: a master win; Bob still gets his own loss.
+    const lost = await submitGame(env.board, bob, { mode: 'ai', brain: 'master', myStone: 2, moves: BLACK_FIVE }, t0);
+    expect(lost.player).toMatchObject({ losses: 1 });
+    const beat = await submitGame(env.board, bob, { mode: 'ai', brain: 'master', myStone: 1, moves: BLACK_FIVE }, t0 + SUBMIT_INTERVAL_MS);
+    expect(beat).toMatchObject({ result: 'win', points: 10 });
+    const board = await readBoard(env.board);
+    expect(board.master).toMatchObject({ wins: 1, losses: 1, challenges: 2, delegated: 0 });
+    expect(board.master?.recent.map((g) => [g.result, g.name])).toEqual([['loss', null], ['win', null]]);
+    // Other games leave the master alone, and publishing players keeps its record.
+    await submitGame(env.board, bob, { mode: 'ai', brain: 'fox', myStone: 1, moves: BLACK_FIVE }, t0 + 2 * SUBMIT_INTERVAL_MS);
+    expect((await readBoard(env.board)).master).toMatchObject({ wins: 1, losses: 1 });
+  });
+
   it('keeps every player when many submit at once', async () => {
     const env = makeEnv();
     const users = await Promise.all(Array.from({ length: 12 }, (_, i) => signIn(env, `p${i}@example.com`, `P${i}`)));
