@@ -16,7 +16,7 @@ export type Profile = {
   muted: boolean;
   lastBrain: BrainId;
   playFirst: boolean;
-  /** Rule last picked for AI games. */
+  /** Rule last picked; shared by AI games, pass-and-play and hosted rooms. */
   rule: Rule;
   nickname: string;
 };

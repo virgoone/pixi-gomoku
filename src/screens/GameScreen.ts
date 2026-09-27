@@ -28,8 +28,9 @@ import { ResultScreen } from './ResultScreen';
 
 export type GameConfig =
   | { mode: 'ai'; brain: BrainId; humanStone: Stone; rule?: Rule }
-  | { mode: 'local' }
-  | { mode: 'online'; link: OnlineLink; myStone: Stone; round: number };
+  | { mode: 'local'; rule?: Rule }
+  /** `notice` is shown once at the start (e.g. the room fell back to free-style). */
+  | { mode: 'online'; link: OnlineLink; myStone: Stone; round: number; rule?: Rule; notice?: string };
 
 type Seat = 'human' | 'ai' | 'remote';
 
@@ -61,7 +62,7 @@ export class GameScreen extends Container {
 
   constructor(private config: GameConfig) {
     super();
-    this.game = new GomokuGame(BOARD_SIZE, config.mode === 'ai' ? config.rule ?? 'freestyle' : 'freestyle');
+    this.game = new GomokuGame(BOARD_SIZE, config.rule ?? 'freestyle');
     this.status = label('', 'heading', { fontSize: 24 });
     this.menu = new IconButton({ icon: 'menu', size: 56, onPress: () => this.openMenu() });
     this.undoButton = new Button({ text: '悔棋', skin: 'white', width: 170, height: 70, icon: 'undo', fontSize: 24, onPress: () => this.undo() });
@@ -85,10 +86,11 @@ export class GameScreen extends Container {
   /** Text for the top-left mode chip. */
   private modeText() {
     const config = this.config;
-    if (config.mode === 'local') return '同屏双人';
-    // The robot icon already says "AI", so renju swaps the prefix to keep the chip short.
-    if (config.mode === 'ai') return `${this.game.rule === 'renju' ? RULE_NAMES.renju : '人机'} · ${brainInfo(config.brain).name}`;
-    return `在线 · 房间 ${config.link.code}`;
+    // The icon already says which mode it is, so renju swaps the prefix to keep the chip short.
+    const renju = this.game.rule === 'renju';
+    if (config.mode === 'local') return renju ? `${RULE_NAMES.renju} · 双人` : '同屏双人';
+    if (config.mode === 'ai') return `${renju ? RULE_NAMES.renju : '人机'} · ${brainInfo(config.brain).name}`;
+    return `${renju ? RULE_NAMES.renju : '在线'} · 房间 ${config.link.code}`;
   }
 
   private modeIcon() {
@@ -137,7 +139,9 @@ export class GameScreen extends Container {
     this.alpha = 0;
     gsap.to(this, { alpha: 1, duration: 0.3 });
     await gsap.from(this.board.scale, { x: 0.85, y: 0.85, duration: 0.4, ease: 'back.out(1.8)' });
-    if (this.game.rule === 'renju') toast(this, '连珠规则：黑棋不能下三三、四四、长连', this.w);
+    const notice = this.config.mode === 'online' ? this.config.notice : undefined;
+    if (notice) toast(this, notice, this.w);
+    else if (this.game.rule === 'renju') toast(this, '连珠规则：黑棋不能下三三、四四、长连', this.w);
     this.nextTurn();
   }
 
@@ -308,7 +312,7 @@ export class GameScreen extends Container {
     const delay = line ? 1800 : 900;
     window.setTimeout(() => {
       if (this.destroyed) return;
-      void navigation.goTo(new ResultScreen(outcome, config.mode === 'online' ? { link: config.link, round: config.round, myStone: config.myStone } : undefined, () => this.replayConfig()));
+      void navigation.goTo(new ResultScreen(outcome, config.mode === 'online' ? { link: config.link, round: config.round, myStone: config.myStone, rule: this.game.rule } : undefined, () => this.replayConfig()));
     }, delay);
   }
 
@@ -361,8 +365,8 @@ export class GameScreen extends Container {
         cancel: '回到主页',
         onConfirm: () => {
           this.opponentGone = false;
-          this.config = { mode: 'ai', brain: 'fox', humanStone: myStone };
-          this.ai = new AiPlayer('fox');
+          this.config = { mode: 'ai', brain: 'fox', humanStone: myStone, rule: this.game.rule };
+          this.ai = new AiPlayer('fox', this.game.rule);
           this.modeBar.setText('mode', this.modeText());
           this.undoButton.visible = true;
           this.setupPlayers();

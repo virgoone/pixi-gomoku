@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseMessage } from '../src/net/online';
+import { agreedRule, parseMessage, PROTOCOL } from '../src/net/online';
 
 describe('parseMessage', () => {
   it('accepts well-formed moves', () => {
@@ -15,7 +15,7 @@ describe('parseMessage', () => {
   });
 
   it('validates start and hello, drops unknown data', () => {
-    expect(parseMessage({ type: 'start', hostStone: 2, round: 2 })).toEqual({ type: 'start', hostStone: 2, round: 2 });
+    expect(parseMessage({ type: 'start', hostStone: 2, round: 2, rule: 'renju' })).toEqual({ type: 'start', hostStone: 2, round: 2, rule: 'renju' });
     expect(parseMessage({ type: 'start', hostStone: 3, round: 1 })).toBeNull();
     expect(parseMessage({ type: 'hello', name: 'a', protocol: 1 })).toEqual({ type: 'hello', name: 'a', protocol: 1 });
     expect(parseMessage({ type: 'hello', name: 5 })).toBeNull();
@@ -23,5 +23,20 @@ describe('parseMessage', () => {
     expect(parseMessage('move')).toBeNull();
     expect(parseMessage(null)).toBeNull();
     expect(parseMessage({ type: 'bye' })).toEqual({ type: 'bye' });
+  });
+});
+
+describe('room rule', () => {
+  it('reads a start without a rule (older host) as free-style', () => {
+    expect(parseMessage({ type: 'start', hostStone: 1, round: 1 })).toEqual({ type: 'start', hostStone: 1, round: 1, rule: 'freestyle' });
+    expect(parseMessage({ type: 'start', hostStone: 1, round: 1, rule: 'caro' })).toEqual({ type: 'start', hostStone: 1, round: 1, rule: 'freestyle' });
+  });
+
+  it('plays renju only when the guest understands it', () => {
+    expect(agreedRule('renju', PROTOCOL)).toBe('renju');
+    expect(agreedRule('renju', 1)).toBe('freestyle');
+    // No hello yet (0) is treated like an old client.
+    expect(agreedRule('renju', 0)).toBe('freestyle');
+    expect(agreedRule('freestyle', PROTOCOL)).toBe('freestyle');
   });
 });

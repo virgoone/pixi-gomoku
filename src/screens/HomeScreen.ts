@@ -8,6 +8,7 @@ import { account } from '../net/account';
 import { tex } from '../app/textures';
 import { BLACK } from '../gomoku/rules';
 import { AiSetupPopup } from '../popups/AiSetupPopup';
+import { LocalSetupPopup } from '../popups/LocalSetupPopup';
 import { OnlinePopup } from '../popups/OnlinePopup';
 import { Backdrop } from '../ui/Backdrop';
 import { IconButton } from '../ui/Button';
@@ -67,7 +68,7 @@ export class HomeScreen extends Container {
 
     this.tiles = [
       new ModeTile({ skin: 'yellow', art: tex('avatar-fox'), title: '人机对战', caption: '三位电脑棋手', onPress: () => this.openAi() }),
-      new ModeTile({ skin: 'blue', art: tex('logo'), title: '同屏双人', caption: '一台设备轮流下', onPress: () => void navigation.goTo(new GameScreen({ mode: 'local' })) }),
+      new ModeTile({ skin: 'blue', art: tex('logo'), title: '同屏双人', caption: '一台设备轮流下', onPress: () => this.openLocal() }),
       new ModeTile({ skin: 'green', art: tex('avatar-friend'), title: '在线房间', caption: '邀请好友对战', onPress: () => this.openOnline() }),
     ];
     this.playView.addChild(...this.tiles);
@@ -142,12 +143,16 @@ export class HomeScreen extends Container {
     void navigation.present(new AiSetupPopup((brain, humanStone, rule) => void navigation.goTo(new GameScreen({ mode: 'ai', brain, humanStone, rule }))));
   }
 
+  private openLocal() {
+    void navigation.present(new LocalSetupPopup((rule) => void navigation.goTo(new GameScreen({ mode: 'local', rule }))));
+  }
+
   private openOnline(code?: string) {
     void navigation.present(
       new OnlinePopup(
         {
-          onStart: (link, myStone) => void navigation.goTo(new GameScreen({ mode: 'online', link, myStone, round: 1 })),
-          onFallback: () => void navigation.goTo(new GameScreen({ mode: 'ai', brain: 'fox', humanStone: BLACK })),
+          onStart: (link, myStone, rule, notice) => void navigation.goTo(new GameScreen({ mode: 'online', link, myStone, round: 1, rule, notice })),
+          onFallback: (rule) => void navigation.goTo(new GameScreen({ mode: 'ai', brain: 'fox', humanStone: BLACK, rule })),
         },
         code,
       ),

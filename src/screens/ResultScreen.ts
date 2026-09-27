@@ -7,7 +7,7 @@ import { say } from '../app/voice';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
-import { BLACK, type Stone, WHITE } from '../gomoku/rules';
+import { BLACK, type Rule, type Stone, WHITE } from '../gomoku/rules';
 import type { NetMessage, OnlineLink } from '../net/online';
 import { Chest } from '../result/Chest';
 import { Effects } from '../result/Effects';
@@ -23,7 +23,7 @@ import { toast } from '../ui/Toast';
 import { type GameConfig, GameScreen } from './GameScreen';
 import { HomeScreen } from './HomeScreen';
 
-type OnlineContext = { link: OnlineLink; round: number; myStone: Stone };
+type OnlineContext = { link: OnlineLink; round: number; myStone: Stone; rule: Rule };
 type RewardKey = keyof Rewards;
 
 const REWARD_META: Record<RewardKey, { icon: string; name: string; currency: 'coins' | 'gems' | 'crowns' }> = {
@@ -744,7 +744,7 @@ export class ResultScreen extends Container {
           this.tryRematch();
         } else if (message.type === 'start' && context.link.role === 'guest') {
           const myStone: Stone = message.hostStone === BLACK ? WHITE : BLACK;
-          void navigation.goTo(new GameScreen({ mode: 'online', link: context.link, myStone, round: message.round }));
+          void navigation.goTo(new GameScreen({ mode: 'online', link: context.link, myStone, round: message.round, rule: message.rule }));
         }
       }),
       context.link.onClose((reason) => {
@@ -760,8 +760,9 @@ export class ResultScreen extends Container {
     const round = context.round + 1;
     // Colours swap every round; round 1 host plays black.
     const hostStone: Stone = round % 2 === 1 ? BLACK : WHITE;
-    context.link.send({ type: 'start', hostStone, round });
-    void navigation.goTo(new GameScreen({ mode: 'online', link: context.link, myStone: hostStone, round }));
+    // The rule was agreed when the room opened and stays for every round.
+    context.link.send({ type: 'start', hostStone, round, rule: context.rule });
+    void navigation.goTo(new GameScreen({ mode: 'online', link: context.link, myStone: hostStone, round, rule: context.rule }));
   }
 
   private goHome() {
