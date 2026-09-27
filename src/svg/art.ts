@@ -1,4 +1,4 @@
-import { GOLD, INK, SILVER, SKINS, type SkinId, type TierColors } from './palette';
+import { GOLD, INK, SKINS, type SkinId, type TierColors } from './palette';
 
 /**
  * Every visual in the game is an SVG string rasterised once at load time.
@@ -97,183 +97,250 @@ export const board = () => {
 };
 
 // ---- chest --------------------------------------------------------------------------
+//
+// A cartoon chest in a 3/4 view, modelled on the reference: plank body with a
+// rim band and base rail, a barrel lid wrapped by two straps, chunky corner
+// feet and a U-shaped lock plate. Drawn with an oblique projection: the depth
+// axis runs back to the upper left, so the left side and lid end cap show.
 
-export const CHEST = { width: 240, bodyHeight: 160, lidHeight: 120, treasureHeight: 130 };
+export const CHEST = { width: 300, height: 300, floor: 284 };
 
-const metalOf = (tier: TierColors) => (tier.metal === 'gold' ? GOLD : SILVER);
+const X0 = 75; // front face, left edge
+const X1 = 271; // front face, right edge
+const DX = -46; // depth vector (front → back)
+const DY = -34;
+const FLOOR = CHEST.floor - 4;
+const RAIL_H = 18; // base rail
+const RIM_H = 14; // band between body and lid
+const TOP = FLOOR - 112; // top of the planks (bottom of the rim band)
+const RIM_TOP = TOP - RIM_H; // where the lid (or the opening) begins
+const LID_R = 50; // barrel height
+const STRAPS = [114, 206]; // strap left edges on the front face
+const STRAP_W = 26;
+const LOCK_X = (X0 + X1) / 2;
+const OUT = `stroke="${INK}" stroke-width="4" stroke-linejoin="round"`;
 
-const metalGradient = (id: string, tier: TierColors, vertical = true) => {
-  const m = metalOf(tier);
+const pt = (x: number, y: number) => `${x.toFixed(1)},${y.toFixed(1)}`;
+const poly = (points: Array<[number, number]>, attrs: string) => `<polygon points="${points.map(([x, y]) => pt(x, y)).join(' ')}" ${attrs}/>`;
+
+/** Left side face between two heights of the front edge. */
+const side = (yTop: number, yBottom: number, attrs: string) =>
+  poly([[X0, yTop], [X0 + DX, yTop + DY], [X0 + DX, yBottom + DY], [X0, yBottom]], attrs);
+
+const lidHeightAt = (t: number) => LID_R * Math.sqrt(Math.max(0, 1 - (2 * t - 1) ** 2));
+const lidY = (t: number) => RIM_TOP + DY * t - lidHeightAt(t);
+
+/** Depth fraction of the barrel's crest as seen on screen (its highest point). */
+const CREST = (() => {
+  let best = 0;
+  for (let t = 0; t <= 1; t += 0.001) if (lidY(t) < lidY(best)) best = t;
+  return best;
+})();
+
+/** Barrel profile at horizontal position x, from depth `from` to `to` (0 = front). */
+function arc(x: number, from = 0, to = 1) {
+  const points: Array<[number, number]> = [];
+  const steps = 20;
+  for (let i = 0; i <= steps; i += 1) {
+    const t = from + ((to - from) * i) / steps;
+    points.push([x + DX * t, lidY(t)]);
+  }
+  return points;
+}
+
+/**
+ * The visible curved surface of the barrel between x = a and x = b: the
+ * front of the barrel up to its crest. (Beyond the crest it is hidden behind
+ * the crest line or by the end cap.)
+ */
+const barrelBand = (a: number, b: number) => [...arc(b, 0, CREST), ...arc(a, CREST, 0)];
+
+const rivet = (x: number, y: number) =>
+  `<circle cx="${x}" cy="${y}" r="5" fill="#fff" stroke="${INK}" stroke-width="2.5"/><circle cx="${x - 1.4}" cy="${y - 1.4}" r="1.6" fill="#fff"/>`;
+
+/** One cuboid foot whose front-bottom corner centre sits at (x, y). */
+function foot(x: number, y: number, tier: TierColors) {
+  const w = 30;
+  const h = 24;
+  const dx = DX * 0.42;
+  const dy = DY * 0.42;
+  const l = x - w / 2;
+  const r = x + w / 2;
   return `
-  <linearGradient id="${id}" x1="0" y1="0" x2="${vertical ? 0 : 1}" y2="${vertical ? 1 : 0}">
-    <stop offset="0" stop-color="${m.light}"/>
-    <stop offset="0.5" stop-color="${m.base}"/>
-    <stop offset="1" stop-color="${m.dark}"/>
-  </linearGradient>`;
-};
+    ${poly([[l, y - h], [l + dx, y - h + dy], [l + dx, y + dy], [l, y]], `fill="${tier.trim.dark}" ${OUT}`)}
+    ${poly([[l, y - h], [r, y - h], [r + dx, y - h + dy], [l + dx, y - h + dy]], `fill="${tier.trim.light}" ${OUT}`)}
+    <rect x="${l}" y="${y - h}" width="${w}" height="${h}" rx="4" fill="${tier.trim.base}" ${OUT}/>
+    <rect x="${l + 4}" y="${y - h + 4}" width="${w - 8}" height="5" rx="2.5" fill="#fff" fill-opacity="0.55"/>`;
+}
 
-const paintGradient = (id: string, tier: TierColors) => `
-  <linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="${tier.light}"/>
-    <stop offset="0.3" stop-color="${tier.base}"/>
-    <stop offset="1" stop-color="${tier.dark}"/>
+function chestDefs(tier: TierColors) {
+  return `
+  <linearGradient id="lidTop" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${tier.body.light}"/>
+    <stop offset="0.55" stop-color="${tier.body.base}"/>
+    <stop offset="1" stop-color="${tier.body.dark}"/>
   </linearGradient>
-  <linearGradient id="${id}-side" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0" stop-color="#fff" stop-opacity="0.22"/>
-    <stop offset="0.25" stop-color="#fff" stop-opacity="0"/>
-    <stop offset="0.75" stop-color="#000" stop-opacity="0"/>
-    <stop offset="1" stop-color="#000" stop-opacity="0.22"/>
-  </linearGradient>`;
+  <linearGradient id="trimV" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${tier.trim.light}"/>
+    <stop offset="0.4" stop-color="${tier.trim.base}"/>
+    <stop offset="1" stop-color="${tier.trim.dark}"/>
+  </linearGradient>
+  <radialGradient id="shadow" cx="0.5" cy="0.5" r="0.5">
+    <stop offset="0" stop-color="#000" stop-opacity="0.45"/>
+    <stop offset="1" stop-color="#000" stop-opacity="0"/>
+  </radialGradient>`;
+}
 
-const rivet = (x: number, y: number, tier: TierColors) =>
-  `<circle cx="${x}" cy="${y}" r="4.2" fill="${metalOf(tier).deep}"/><circle cx="${x - 1.2}" cy="${y - 1.2}" r="1.6" fill="#fff" fill-opacity="0.8"/>`;
+/** Planks, rails, straps, front feet and lock: everything below the lid line. */
+function chestBase(tier: TierColors) {
+  const { body, trim } = tier;
+  const plankH = (FLOOR - RAIL_H - TOP) / 3;
+  const planks = [0, 1, 2]
+    .map((i) => {
+      const y = TOP + i * plankH;
+      return `
+    ${side(y, y + plankH, `fill="${body.side}" ${OUT}`)}
+    <path d="M${X0 + DX} ${y + DY + 5} L${X0} ${y + 5}" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>
+    <rect x="${X0}" y="${y}" width="${X1 - X0}" height="${plankH}" rx="7" fill="${body.base}" ${OUT}/>
+    <rect x="${X0 + 5}" y="${y + 4}" width="${X1 - X0 - 10}" height="6" rx="3" fill="${body.light}"/>
+    <rect x="${X0 + 5}" y="${y + plankH - 8}" width="${X1 - X0 - 10}" height="5" rx="2.5" fill="${body.dark}"/>`;
+    })
+    .join('');
+  const straps = STRAPS.map(
+    (x) => `
+    <rect x="${x}" y="${RIM_TOP + 4}" width="${STRAP_W}" height="${FLOOR - RAIL_H - RIM_TOP}" rx="4" fill="url(#trimV)" ${OUT}/>
+    <rect x="${x + 4}" y="${RIM_TOP + 8}" width="5" height="${FLOOR - RAIL_H - RIM_TOP - 10}" rx="2.5" fill="#fff" fill-opacity="0.45"/>
+    ${rivet(x + STRAP_W / 2, TOP + 26)}${rivet(x + STRAP_W / 2, TOP + 74)}`,
+  ).join('');
+  return `
+  <ellipse cx="${(X0 + X1 + DX) / 2}" cy="${FLOOR + 2}" rx="${(X1 - X0) / 2 + 40}" ry="22" fill="url(#shadow)"/>
+  ${foot(X0 + DX + 18, FLOOR + DY, tier)}
+  ${planks}
+  ${side(FLOOR - RAIL_H, FLOOR, `fill="${trim.dark}" ${OUT}`)}
+  <rect x="${X0 - 2}" y="${FLOOR - RAIL_H}" width="${X1 - X0 + 4}" height="${RAIL_H}" rx="5" fill="url(#trimV)" ${OUT}/>
+  <rect x="${X0 + 4}" y="${FLOOR - RAIL_H + 4}" width="${X1 - X0 - 8}" height="4" rx="2" fill="#fff" fill-opacity="0.5"/>
+  ${side(RIM_TOP, TOP, `fill="${trim.dark}" ${OUT}`)}
+  <rect x="${X0 - 3}" y="${RIM_TOP}" width="${X1 - X0 + 6}" height="${RIM_H}" rx="4" fill="url(#trimV)" ${OUT}/>
+  <rect x="${X0 + 3}" y="${RIM_TOP + 3}" width="${X1 - X0 - 6}" height="3.5" rx="1.75" fill="#fff" fill-opacity="0.6"/>
+  <path d="M${X0 + 2} ${TOP + 3} H${X1 - 2}" stroke="${body.line}" stroke-width="4"/>
+  ${straps}
+  ${foot(X0 + 4, FLOOR, tier)}
+  ${foot(X1 - 4, FLOOR, tier)}`;
+}
 
-/** Front of the chest. The lid overlaps its top 20 units. */
-export const chestBody = (tier: TierColors) =>
-  svg(CHEST.width, CHEST.bodyHeight, `
-  <defs>
-    ${paintGradient('paint', tier)}
-    ${metalGradient('metal', tier)}
-    ${metalGradient('metalH', tier, false)}
-  </defs>
-  <rect x="14" y="18" width="212" height="140" rx="18" fill="${INK}"/>
-  <rect x="14" y="10" width="212" height="140" rx="18" fill="url(#paint)" stroke="${INK}" stroke-width="6"/>
-  <rect x="17" y="13" width="206" height="134" rx="15" fill="url(#paint-side)"/>
-  <path d="M20 58 H220 M20 100 H220" stroke="${tier.rim}" stroke-opacity="0.55" stroke-width="4"/>
-  <path d="M22 62 H218 M22 104 H218" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>
-  <rect x="9" y="6" width="222" height="24" rx="10" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
-  <rect x="16" y="10" width="208" height="5" rx="2.5" fill="#fff" fill-opacity="0.65"/>
-  <rect x="9" y="128" width="222" height="24" rx="10" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
-  <rect x="16" y="132" width="208" height="5" rx="2.5" fill="#fff" fill-opacity="0.5"/>
-  ${[34, 180]
-    .map(
-      (x) => `
-    <rect x="${x}" y="4" width="26" height="150" rx="6" fill="url(#metalH)" stroke="${INK}" stroke-width="4.5"/>
-    <rect x="${x + 4}" y="10" width="5" height="138" rx="2.5" fill="#fff" fill-opacity="0.55"/>
-    ${rivet(x + 13, 46, tier)}${rivet(x + 13, 80, tier)}${rivet(x + 13, 114, tier)}`,
-    )
-    .join('')}
-  <path d="M92 24 H148 V66 Q148 88 120 96 Q92 88 92 66 Z" fill="${INK}" transform="translate(0 4)"/>
-  <path d="M92 24 H148 V66 Q148 88 120 96 Q92 88 92 66 Z" fill="url(#metalH)" stroke="${INK}" stroke-width="5"/>
-  <path d="M99 30 H141 V38 H99 Z" fill="#fff" fill-opacity="0.55"/>
-  <circle cx="120" cy="56" r="9" fill="${INK}"/>
-  <path d="M114.5 58 H125.5 L123 78 H117 Z" fill="${INK}"/>`);
+function starPath(cx: number, cy: number, outer: number, inner: number) {
+  let d = '';
+  for (let i = 0; i < 10; i += 1) {
+    const r = i % 2 ? inner : outer;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    d += `${i ? 'L' : 'M'}${(cx + Math.cos(a) * r).toFixed(1)} ${(cy + Math.sin(a) * r).toFixed(1)} `;
+  }
+  return `${d}Z`;
+}
 
-/** Domed lid, closed. */
-export const chestLidClosed = (tier: TierColors) => {
-  const dome = 'M12 112 V66 Q12 12 120 10 Q228 12 228 66 V112 Z';
-  return svg(CHEST.width, CHEST.lidHeight, `
-  <defs>
-    ${paintGradient('paint', tier)}
-    ${metalGradient('metal', tier)}
-    ${metalGradient('metalH', tier, false)}
-    <clipPath id="dome"><path d="${dome}"/></clipPath>
-    <radialGradient id="gem" cx="0.35" cy="0.3" r="0.8">
-      <stop offset="0" stop-color="#fff"/>
-      <stop offset="0.35" stop-color="${tier.gem}"/>
-      <stop offset="1" stop-color="${tier.dark}"/>
-    </radialGradient>
-  </defs>
-  <path d="${dome}" fill="${INK}" transform="translate(0 5)"/>
-  <path d="${dome}" fill="url(#paint)"/>
-  <g clip-path="url(#dome)">
-    <rect x="0" y="0" width="240" height="120" fill="url(#paint-side)"/>
-    <path d="M8 60 Q120 30 232 60" fill="none" stroke="${tier.rim}" stroke-opacity="0.55" stroke-width="4"/>
-    <path d="M8 65 Q120 35 232 65" fill="none" stroke="#fff" stroke-opacity="0.16" stroke-width="3"/>
-    <rect x="34" y="0" width="26" height="120" fill="url(#metalH)" stroke="${INK}" stroke-width="4.5"/>
-    <rect x="180" y="0" width="26" height="120" fill="url(#metalH)" stroke="${INK}" stroke-width="4.5"/>
-    <rect x="38" y="0" width="5" height="120" fill="#fff" fill-opacity="0.5"/>
-    <rect x="184" y="0" width="5" height="120" fill="#fff" fill-opacity="0.5"/>
-    ${rivet(47, 40, tier)}${rivet(193, 40, tier)}${rivet(47, 72, tier)}${rivet(193, 72, tier)}
-  </g>
-  <path d="${dome}" fill="none" stroke="${INK}" stroke-width="6"/>
-  <path d="M70 30 Q120 16 170 30" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="7" stroke-linecap="round"/>
-  <rect x="7" y="90" width="226" height="24" rx="10" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
-  <rect x="14" y="94" width="212" height="5" rx="2.5" fill="#fff" fill-opacity="0.6"/>
-  <path d="M120 14 L136 32 L120 52 L104 32 Z" fill="${INK}" transform="translate(0 3)"/>
-  <path d="M120 14 L136 32 L120 52 L104 32 Z" fill="url(#gem)" stroke="${INK}" stroke-width="4"/>
-  <path d="M120 18 L128 32 L120 32 Z" fill="#fff" fill-opacity="0.7"/>
-  <rect x="104" y="82" width="32" height="36" rx="8" fill="url(#metalH)" stroke="${INK}" stroke-width="5"/>
-  <rect x="115" y="96" width="10" height="14" rx="4" fill="${INK}"/>`);
+/** Closed chest, whole. */
+export const chestClosed = (tier: TierColors) => {
+  const { body, trim } = tier;
+  const shell = barrelBand(X0, X1);
+  const cap = arc(X0);
+  const strapBands = STRAPS.map((x) => poly(barrelBand(x, x + STRAP_W), `fill="url(#trimV)" ${OUT}`)).join('');
+  // Highlight and shade lines running along the barrel.
+  const glint = (t: number) => `M${X0 + DX * t + 10} ${lidY(t) + 2} H${X1 + DX * t - 10}`;
+  return svg(CHEST.width, CHEST.height, `
+  <defs>${chestDefs(tier)}</defs>
+  ${chestBase(tier)}
+  ${poly(shell, `fill="url(#lidTop)" ${OUT}`)}
+  <path d="${glint(CREST * 0.72)}" stroke="#fff" stroke-opacity="0.55" stroke-width="7" stroke-linecap="round"/>
+  <path d="${glint(CREST * 0.25)}" stroke="${body.dark}" stroke-opacity="0.45" stroke-width="4" stroke-linecap="round"/>
+  ${strapBands}
+  ${poly(cap, `fill="${body.side}" ${OUT}`)}
+  <rect x="${LOCK_X + DX * CREST - 12}" y="${lidY(CREST) - 7}" width="24" height="12" rx="4" fill="${trim.light}" ${OUT}/>
+  ${chestLock(tier, false)}`);
 };
 
-/** The lid swung back: we see its inner face above the body. */
-export const chestLidOpen = (tier: TierColors) =>
-  svg(CHEST.width, CHEST.lidHeight, `
-  <defs>
-    ${metalGradient('metal', tier)}
-    ${metalGradient('metalH', tier, false)}
-    <linearGradient id="inside" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${tier.dark}"/>
-      <stop offset="1" stop-color="${tier.rim}"/>
-    </linearGradient>
-    <linearGradient id="shine" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="${GOLD.light}" stop-opacity="0.9"/>
-      <stop offset="0.7" stop-color="${GOLD.light}" stop-opacity="0"/>
-    </linearGradient>
-  </defs>
-  <path d="M18 116 L6 26 Q8 6 120 4 Q232 6 234 26 L222 116 Z" fill="${INK}"/>
-  <path d="M22 112 L12 28 Q14 12 120 10 Q226 12 228 28 L218 112 Z" fill="${tier.base}" stroke="${INK}" stroke-width="5"/>
-  <path d="M38 108 L30 36 Q32 26 120 24 Q208 26 210 36 L202 108 Z" fill="url(#inside)"/>
-  <path d="M34 74 Q120 60 206 74" fill="none" stroke="#000" stroke-opacity="0.2" stroke-width="4"/>
-  <path d="M38 108 L30 36 Q32 26 120 24 Q208 26 210 36 L202 108 Z" fill="url(#shine)"/>
-  <path d="M42 110 L34 12 H58 L64 110 Z" fill="url(#metalH)" stroke="${INK}" stroke-width="4"/>
-  <path d="M198 110 L206 12 H182 L176 110 Z" fill="url(#metalH)" stroke="${INK}" stroke-width="4"/>
-  <rect x="12" y="98" width="216" height="20" rx="8" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
-  <rect x="18" y="101" width="204" height="4" rx="2" fill="#fff" fill-opacity="0.6"/>`);
+/** The lock plate on its own, drawn last so it overlaps the lid edge. */
+function chestLock(tier: TierColors, open: boolean) {
+  const lockTop = open ? RIM_TOP + 2 : RIM_TOP - 12;
+  const lockBottom = TOP + 52;
+  return `
+    <path d="M${LOCK_X - 20} ${lockTop} H${LOCK_X + 20} V${lockBottom - 20} Q${LOCK_X + 20} ${lockBottom} ${LOCK_X} ${lockBottom} Q${LOCK_X - 20} ${lockBottom} ${LOCK_X - 20} ${lockBottom - 20} Z" fill="url(#trimV)" ${OUT}/>
+    <rect x="${LOCK_X - 14}" y="${lockTop + 5}" width="28" height="5" rx="2.5" fill="#fff" fill-opacity="0.55"/>
+    ${
+      tier.star
+        ? `<path d="${starPath(LOCK_X, lockTop + 22, 10, 4.4)}" fill="#fff" stroke="${INK}" stroke-width="2.5" stroke-linejoin="round"/>`
+        : rivet(LOCK_X, lockTop + 20)
+    }
+    <circle cx="${LOCK_X}" cy="${lockBottom - 20}" r="5" fill="${INK}"/>
+    <path d="M${LOCK_X - 3} ${lockBottom - 18} H${LOCK_X + 3} L${LOCK_X + 2} ${lockBottom - 9} H${LOCK_X - 2} Z" fill="${INK}"/>`;
+}
 
-/** Treasure heaped in the open chest; the body's top band hides its base. */
-export const chestTreasure = () => {
-  const rows: Array<[number, number, number]> = [
-    // y, first x, count
-    [112, 30, 9],
-    [100, 42, 8],
-    [88, 54, 7],
-    [76, 66, 6],
-    [64, 80, 5],
-    [53, 96, 3],
+/** Open chest: lid stood up behind, glowing inside, a heap of coins. */
+export const chestOpen = (tier: TierColors) => {
+  const { body, trim } = tier;
+  // Hinge along the back top edge; the lid stands up and leans back a little.
+  const hy = RIM_TOP + DY;
+  const hl = X0 + DX;
+  const hr = X1 + DX;
+  const lean = -14;
+  const lidH = 112;
+  const outer: Array<[number, number]> = [[hl, hy], [hr, hy], [hr + lean, hy - lidH], [hl + lean, hy - lidH]];
+  const inset = 11;
+  const inner: Array<[number, number]> = [
+    [hl + inset, hy - 4],
+    [hr - inset, hy - 4],
+    [hr + lean - inset + 2, hy - lidH + inset],
+    [hl + lean + inset + 2, hy - lidH + inset],
   ];
-  let seed = 7;
-  const jitter = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280 - 0.5);
-  const coin = (x: number, y: number) => {
-    const r = jitter() * 24;
-    return `
-    <g transform="rotate(${r.toFixed(1)} ${x} ${y})">
-      <ellipse cx="${x}" cy="${y + 3.5}" rx="14" ry="7" fill="${GOLD.deep}" stroke="${INK}" stroke-width="2.5"/>
-      <ellipse cx="${x}" cy="${y}" rx="14" ry="7" fill="url(#coin)" stroke="${INK}" stroke-width="2.5"/>
-      <ellipse cx="${x}" cy="${y}" rx="8" ry="3.6" fill="none" stroke="${GOLD.dark}" stroke-width="1.6"/>
-      <ellipse cx="${x - 4}" cy="${y - 2}" rx="4" ry="1.6" fill="#fff" fill-opacity="0.85"/>
-    </g>`;
-  };
-  const coins = rows
-    .map(([y, x0, count]) => Array.from({ length: count }, (_, i) => coin(x0 + i * 22 + jitter() * 6, y + jitter() * 4)).join(''))
-    .join('');
-  const gem = (x: number, y: number, size: number, fill: string, id: string) => `
-    <radialGradient id="${id}" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="#fff"/><stop offset="0.4" stop-color="${fill}"/><stop offset="1" stop-color="${INK}" stop-opacity="0.6"/></radialGradient>
-    <path d="M${x} ${y - size} L${x + size * 0.8} ${y - size * 0.25} L${x} ${y + size} L${x - size * 0.8} ${y - size * 0.25} Z" fill="url(#${id})" stroke="${INK}" stroke-width="3"/>
-    <path d="M${x - size * 0.8} ${y - size * 0.25} H${x + size * 0.8} M${x} ${y - size} L${x - size * 0.3} ${y - size * 0.25} L${x} ${y + size} L${x + size * 0.3} ${y - size * 0.25} Z" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="1.6"/>`;
-  const glint = (x: number, y: number, s: number) =>
-    `<path d="M${x} ${y - s} Q${x} ${y} ${x + s} ${y} Q${x} ${y} ${x} ${y + s} Q${x} ${y} ${x - s} ${y} Q${x} ${y} ${x} ${y - s} Z" fill="#fff"/>`;
-  return svg(CHEST.width, CHEST.treasureHeight, `
+  // Opening in the top of the body.
+  const opening: Array<[number, number]> = [[X0, RIM_TOP], [X1, RIM_TOP], [X1 + DX, RIM_TOP + DY], [X0 + DX, RIM_TOP + DY]];
+  let seed = 11;
+  const rand = () => (seed = (seed * 9301 + 49297) % 233280) / 233280;
+  const coins: string[] = [];
+  for (let row = 0; row < 5; row += 1) {
+    const t = 0.85 - row * 0.17;
+    const count = 9 - Math.abs(row - 2);
+    for (let i = 0; i < count; i += 1) {
+      const fx = (i + 0.5 + (rand() - 0.5) * 0.5) / count;
+      const x = X0 + 16 + fx * (X1 - X0 - 32) + DX * t;
+      const bulge = Math.sin(fx * Math.PI) * 26 + 8;
+      const y = RIM_TOP + DY * t - bulge * (0.6 + 0.4 * (1 - Math.abs(t - 0.5) * 2)) + 6;
+      const r = (rand() - 0.5) * 30;
+      coins.push(`
+    <g transform="rotate(${r.toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)})">
+      <ellipse cx="${x.toFixed(1)}" cy="${(y + 3).toFixed(1)}" rx="13" ry="6.5" fill="${GOLD.dark}" stroke="${INK}" stroke-width="2"/>
+      <ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="13" ry="6.5" fill="#fff4b8" stroke="${INK}" stroke-width="2"/>
+      <ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="7" ry="3" fill="none" stroke="${GOLD.base}" stroke-width="1.6"/>
+    </g>`);
+    }
+  }
+  const glint = (x: number, y: number, r: number) =>
+    `<path d="M${x} ${y - r} Q${x} ${y} ${x + r} ${y} Q${x} ${y} ${x} ${y + r} Q${x} ${y} ${x - r} ${y} Q${x} ${y} ${x} ${y - r} Z" fill="#fff"/>`;
+  return svg(CHEST.width, CHEST.height, `
   <defs>
-    <radialGradient id="light" cx="0.5" cy="0.8" r="0.6">
-      <stop offset="0" stop-color="#fffbe0" stop-opacity="0.95"/>
-      <stop offset="0.55" stop-color="${GOLD.base}" stop-opacity="0.5"/>
-      <stop offset="1" stop-color="${GOLD.base}" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="coin" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${GOLD.light}"/>
-      <stop offset="0.6" stop-color="${GOLD.base}"/>
-      <stop offset="1" stop-color="${GOLD.dark}"/>
+    ${chestDefs(tier)}
+    <linearGradient id="lidInside" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#fff8cf"/>
+      <stop offset="0.45" stop-color="#ffd84a"/>
+      <stop offset="1" stop-color="#f7a21b"/>
+    </linearGradient>
+    <linearGradient id="hole" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe98a"/>
+      <stop offset="1" stop-color="#ffb52e"/>
     </linearGradient>
   </defs>
-  <ellipse cx="120" cy="84" rx="120" ry="48" fill="url(#light)"/>
-  <ellipse cx="120" cy="118" rx="106" ry="12" fill="#1b0d2a"/>
-  ${coins}
-  ${gem(120, 34, 17, '#ff5fa2', 'g1')}
-  ${gem(70, 84, 10, '#6fd2ff', 'g2')}
-  ${gem(170, 80, 11, '#8ff5a0', 'g3')}
-  ${glint(92, 50, 7)}${glint(156, 44, 9)}${glint(196, 92, 6)}${glint(46, 96, 5)}`);
+  ${poly(outer, `fill="url(#trimV)" ${OUT}`)}
+  ${poly(inner, `fill="url(#lidInside)"`)}
+  <path d="M${hl + lean + inset + 14} ${hy - lidH + inset + 12} L${hl + inset + 10} ${hy - 20}" stroke="#fff" stroke-opacity="0.6" stroke-width="6" stroke-linecap="round"/>
+  <path d="M${hl} ${hy} Q${hl - 18 + lean} ${hy - lidH / 2} ${hl + lean} ${hy - lidH} Z" fill="${body.side}" ${OUT}/>
+  ${chestBase(tier)}
+  ${poly(opening, `fill="url(#hole)" ${OUT}`)}
+  ${coins.join('')}
+  ${glint(X0 + 40, RIM_TOP - 30, 7)}${glint(X1 - 60, RIM_TOP - 44, 9)}${glint(LOCK_X - 10, RIM_TOP - 52, 6)}
+  ${side(RIM_TOP, TOP, `fill="${trim.dark}" ${OUT}`)}
+  <rect x="${X0 - 3}" y="${RIM_TOP}" width="${X1 - X0 + 6}" height="${RIM_H}" rx="4" fill="url(#trimV)" ${OUT}/>
+  <rect x="${X0 + 3}" y="${RIM_TOP + 3}" width="${X1 - X0 - 6}" height="3.5" rx="1.75" fill="#fff" fill-opacity="0.6"/>
+  ${STRAPS.map((x) => `<rect x="${x}" y="${RIM_TOP + 4}" width="${STRAP_W}" height="${TOP - RIM_TOP + 30}" rx="4" fill="url(#trimV)" ${OUT}/>${rivet(x + STRAP_W / 2, TOP + 26)}`).join('')}
+  ${chestLock(tier, true)}`);
 };
 
 // ---- badge (loss / draw) ------------------------------------------------------------
@@ -466,6 +533,27 @@ export const card = (selected: boolean) =>
   <rect x="4" y="9" width="132" height="127" rx="28" fill="#0d0620" fill-opacity="0.45"/>
   <rect x="4" y="4" width="132" height="127" rx="28" fill="${selected ? '#fff7d6' : '#f4efff'}" stroke="${selected ? GOLD.dark : INK}" stroke-width="${selected ? 7 : 5}"/>
   <rect x="18" y="12" width="104" height="10" rx="5" fill="#fff" fill-opacity="0.9"/>`);
+
+/** Orange-gold reward tile from the reference result screen; nine-slice (slice 40). */
+export const rewardCard = (rainbow = false) =>
+  svg(140, 140, `
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffd35a"/>
+      <stop offset="0.55" stop-color="#ffac2e"/>
+      <stop offset="1" stop-color="#f08214"/>
+    </linearGradient>
+    <linearGradient id="rainbow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff7ab6"/>
+      <stop offset="0.35" stop-color="#ffd84a"/>
+      <stop offset="0.65" stop-color="#6fe3ff"/>
+      <stop offset="1" stop-color="#b98cff"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="10" width="132" height="126" rx="22" fill="${INK}"/>
+  <rect x="4" y="4" width="132" height="126" rx="22" fill="url(#face)" stroke="${INK}" stroke-width="5"/>
+  <rect x="11" y="11" width="118" height="112" rx="16" fill="none" stroke="${rainbow ? 'url(#rainbow)' : '#fff1b8'}" stroke-width="${rainbow ? 6 : 3}" stroke-opacity="${rainbow ? 1 : 0.8}"/>
+  <rect x="20" y="16" width="100" height="8" rx="4" fill="#fff" fill-opacity="0.6"/>`);
 
 /** Small dark pill for currency counters; nine-slice (slice 24). */
 export const pill = () =>

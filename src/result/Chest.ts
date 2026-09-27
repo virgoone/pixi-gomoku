@@ -5,59 +5,61 @@ import { tex } from '../app/textures';
 import { CHEST } from '../svg/art';
 import type { TierId } from '../svg/palette';
 
+/** Height of the chest's opening above the floor, in art units. */
+const MOUTH_Y = 150;
+
 /**
- * A chest assembled from SVG parts. Origin is the bottom centre of the body so
- * squash-and-stretch pivots on the floor.
+ * The result chest: one closed and one open drawing per tier. Origin is the
+ * floor under the chest's centre so squash-and-stretch pivots on the ground.
  */
 export class Chest extends Container {
   readonly rig = new Container();
-  private body: Sprite;
-  private lid: Sprite;
-  private lidOpen: Sprite;
-  private treasure: Sprite;
+  private closed: Sprite;
+  private opened: Sprite;
   private innerGlow: Sprite;
+  private shaft: Sprite;
   tier: TierId;
-  opened = false;
+  isOpen = false;
 
   constructor(tier: TierId) {
     super();
     this.tier = tier;
-    this.body = new Sprite(tex(`chest-body-${tier}`));
-    this.body.anchor.set(0.5, 1);
-    this.lid = new Sprite(tex(`chest-lid-${tier}`));
-    this.lid.anchor.set(0.5, 1);
-    this.lid.y = -CHEST.bodyHeight + 20;
-    this.lidOpen = new Sprite(tex(`chest-open-${tier}`));
-    this.lidOpen.anchor.set(0.5, 1);
-    this.lidOpen.y = -CHEST.bodyHeight - 34;
-    this.lidOpen.visible = false;
+    const anchorY = CHEST.floor / CHEST.height;
+    this.closed = new Sprite(tex(`chest-closed-${tier}`));
+    this.closed.anchor.set(0.5, anchorY);
+    this.opened = new Sprite(tex(`chest-open-${tier}`));
+    this.opened.anchor.set(0.5, anchorY);
+    this.opened.visible = false;
+    // Light pouring out of the open chest.
     this.innerGlow = new Sprite(tex('glow'));
     this.innerGlow.anchor.set(0.5);
     this.innerGlow.tint = 0xffe38a;
     this.innerGlow.blendMode = 'add';
-    this.innerGlow.width = 420;
-    this.innerGlow.height = 260;
-    this.innerGlow.y = -CHEST.bodyHeight - 10;
+    this.innerGlow.width = 460;
+    this.innerGlow.height = 300;
+    this.innerGlow.y = -MOUTH_Y - 20;
     this.innerGlow.alpha = 0;
-    this.treasure = new Sprite(tex('treasure'));
-    this.treasure.anchor.set(0.5, 1);
-    // Its base tucks behind the body's top band so the heap sits inside the chest.
-    this.treasure.y = -CHEST.bodyHeight + 14;
-    this.treasure.visible = false;
-    this.rig.addChild(this.lidOpen, this.innerGlow, this.treasure, this.body, this.lid);
+    this.shaft = new Sprite(tex('glow'));
+    this.shaft.anchor.set(0.5, 0.5);
+    this.shaft.tint = 0xfff3c0;
+    this.shaft.blendMode = 'add';
+    this.shaft.width = 190;
+    this.shaft.height = 360;
+    this.shaft.y = -MOUTH_Y - 90;
+    this.shaft.alpha = 0;
+    this.rig.addChild(this.innerGlow, this.closed, this.opened, this.shaft);
     this.addChild(this.rig);
   }
 
-  /** Top of the chest in local coordinates; where rewards burst from. */
+  /** The opening in local coordinates; where rewards burst from. */
   get mouth() {
-    return { x: 0, y: -CHEST.bodyHeight - 50 };
+    return { x: 0, y: -MOUTH_Y };
   }
 
   setTier(tier: TierId) {
     this.tier = tier;
-    this.body.texture = tex(`chest-body-${tier}`);
-    this.lid.texture = tex(`chest-lid-${tier}`);
-    this.lidOpen.texture = tex(`chest-open-${tier}`);
+    this.closed.texture = tex(`chest-closed-${tier}`);
+    this.opened.texture = tex(`chest-open-${tier}`);
   }
 
   /** Squash on landing. */
@@ -77,20 +79,20 @@ export class Chest extends Container {
   }
 
   async open() {
-    if (this.opened) return;
-    this.opened = true;
+    if (this.isOpen) return;
+    this.isOpen = true;
     const tl = gsap.timeline();
-    tl.to(this.rig.scale, { x: 1.1, y: 0.86, duration: 0.14, ease: 'power2.in' });
+    // Crouch, then burst open with a stretch and a wobble.
+    tl.to(this.rig.scale, { x: 1.12, y: 0.84, duration: 0.14, ease: 'power2.in' });
     tl.add(() => {
-      this.lid.visible = false;
-      this.lidOpen.visible = true;
-      this.treasure.visible = true;
+      this.closed.visible = false;
+      this.opened.visible = true;
     });
-    tl.to(this.rig.scale, { x: 0.94, y: 1.12, duration: 0.12, ease: 'power2.out' });
-    tl.to(this.rig.scale, { x: 1, y: 1, duration: 0.5, ease: 'elastic.out(1, 0.4)' });
-    tl.fromTo(this.lidOpen, { y: this.lidOpen.y + 30 }, { y: this.lidOpen.y, duration: 0.3, ease: 'back.out(3)' }, 0.14);
-    tl.fromTo(this.treasure.scale, { x: 0.6, y: 0.2 }, { x: 1, y: 1, duration: 0.4, ease: 'back.out(2.4)' }, 0.16);
+    tl.to(this.rig.scale, { x: 0.93, y: 1.12, duration: 0.12, ease: 'power2.out' });
+    tl.to(this.rig.scale, { x: 1, y: 1, duration: 0.55, ease: 'elastic.out(1, 0.4)' });
     tl.to(this.innerGlow, { alpha: 1, duration: 0.3 }, 0.14);
+    tl.fromTo(this.shaft, { alpha: 0 }, { alpha: 0.9, duration: 0.25 }, 0.14);
+    tl.fromTo(this.shaft.scale, { y: this.shaft.scale.y * 0.3 }, { y: this.shaft.scale.y, duration: 0.4, ease: 'power2.out' }, 0.14);
     await tl;
   }
 
@@ -100,6 +102,8 @@ export class Chest extends Container {
   }
 
   pulseGlow(time: number) {
-    if (this.opened) this.innerGlow.alpha = 0.75 + 0.25 * Math.sin(time * 4);
+    if (!this.isOpen) return;
+    this.innerGlow.alpha = 0.75 + 0.25 * Math.sin(time * 4);
+    this.shaft.alpha = 0.55 + 0.2 * Math.sin(time * 3 + 1);
   }
 }

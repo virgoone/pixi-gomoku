@@ -6,8 +6,8 @@ import * as art from '/src/svg/art.ts';
 import { TIERS } from '/src/svg/palette.ts';
 const add = (name, s, bg) => { const f = document.createElement('figure'); if (bg) f.style.background = bg; const i = new Image(); i.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(s); f.append(i, name); document.body.append(f); };
 add('black', art.blackStone()); add('white', art.whiteStone()); add('board', art.board());
-for (const t of [0,1,2,3]) { add('body'+t, art.chestBody(TIERS[t])); add('lid'+t, art.chestLidClosed(TIERS[t])); add('lidOpen'+t, art.chestLidOpen(TIERS[t])); }
-add('treasure', art.chestTreasure()); add('badge-s', art.badge('silver')); add('badge-b', art.badge('bronze'));
+for (const t of [0,1,2,3]) { add('closed'+t, art.chestClosed(TIERS[t]), '#3a1a5a'); add('open'+t, art.chestOpen(TIERS[t]), '#3a1a5a'); }
+add('badge-s', art.badge('silver')); add('badge-b', art.badge('bronze'));
 add('coin', art.coinIcon()); add('gem', art.gemIcon()); add('crown', art.crownIcon()); add('star', art.starIcon());
 add('rays', art.rays(), '#553'); add('ring', art.ring(), '#335'); add('sparkle', art.sparkle());
 for (const s of ['yellow','blue','green','red','white','dark']) { add('btn-'+s, art.buttonSkin(s)); add('round-'+s, art.roundSkin(s)); }

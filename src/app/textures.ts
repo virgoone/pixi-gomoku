@@ -14,7 +14,6 @@ const registry: Record<string, Entry> = {
   'stone-white': { svg: art.whiteStone, width: 100, height: 100 },
   'stone-shadow': { svg: art.stoneShadow, width: 100, height: 100 },
   board: { svg: art.board, width: 1000, height: 1000 },
-  treasure: { svg: art.chestTreasure, width: art.CHEST.width, height: art.CHEST.treasureHeight },
   'badge-silver': { svg: () => art.badge('silver'), width: 220, height: 250 },
   'badge-bronze': { svg: () => art.badge('bronze'), width: 220, height: 250 },
   coin: { svg: art.coinIcon, width: 100, height: 100 },
@@ -29,6 +28,8 @@ const registry: Record<string, Entry> = {
   card: { svg: () => art.card(false), width: 140, height: 140 },
   'card-selected': { svg: () => art.card(true), width: 140, height: 140 },
   pill: { svg: art.pill, width: 96, height: 48 },
+  'reward-card': { svg: () => art.rewardCard(false), width: 140, height: 140 },
+  'reward-card-rare': { svg: () => art.rewardCard(true), width: 140, height: 140 },
   logo: { svg: art.logoStones, width: 220, height: 140 },
   'backdrop-home': { svg: () => art.backdrop('#5b2fb0', '#160a33'), width: 1000, height: 1000 },
   'backdrop-game': { svg: () => art.backdrop('#3a2a78', '#120a2a'), width: 1000, height: 1000 },
@@ -40,9 +41,8 @@ for (const skin of skins) {
   registry[`round-${skin}`] = { svg: () => art.roundSkin(skin), width: 96, height: 96 };
 }
 for (const tier of tiers) {
-  registry[`chest-body-${tier}`] = { svg: () => art.chestBody(TIERS[tier]), width: art.CHEST.width, height: art.CHEST.bodyHeight };
-  registry[`chest-lid-${tier}`] = { svg: () => art.chestLidClosed(TIERS[tier]), width: art.CHEST.width, height: art.CHEST.lidHeight };
-  registry[`chest-open-${tier}`] = { svg: () => art.chestLidOpen(TIERS[tier]), width: art.CHEST.width, height: art.CHEST.lidHeight };
+  registry[`chest-closed-${tier}`] = { svg: () => art.chestClosed(TIERS[tier]), width: art.CHEST.width, height: art.CHEST.height };
+  registry[`chest-open-${tier}`] = { svg: () => art.chestOpen(TIERS[tier]), width: art.CHEST.width, height: art.CHEST.height };
   registry[`backdrop-tier-${tier}`] = { svg: () => art.backdrop(TIERS[tier].bgInner, TIERS[tier].bgOuter), width: 1000, height: 1000 };
 }
 for (const [id, make] of Object.entries(art.ICONS)) registry[`icon-${id}`] = { svg: make, width: 64, height: 64 };

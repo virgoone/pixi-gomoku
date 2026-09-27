@@ -1,4 +1,4 @@
-import { Container, NineSliceSprite, Sprite, type Text, type Ticker } from 'pixi.js';
+import { Container, Graphics, NineSliceSprite, Sprite, type Text, type Ticker } from 'pixi.js';
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
@@ -325,19 +325,30 @@ export class ResultScreen extends Container {
     for (const [index, key] of entries.entries()) {
       const meta = REWARD_META[key];
       const card = new Container();
-      const bg = new NineSliceSprite({ texture: tex('card-selected'), leftWidth: 40, rightWidth: 40, topHeight: 40, bottomHeight: 40 });
+      // The crown is the special prize: rainbow frame and a NEW! tag, as in the reference.
+      const special = key === 'crowns';
+      const bg = new NineSliceSprite({ texture: tex(special ? 'reward-card-rare' : 'reward-card'), leftWidth: 40, rightWidth: 40, topHeight: 40, bottomHeight: 40 });
       bg.width = cardWidth;
       bg.height = 150;
       bg.position.set(-cardWidth / 2, -75);
       const icon = new Sprite(tex(meta.icon));
       icon.anchor.set(0.5);
       icon.width = icon.height = 64;
-      icon.y = -26;
-      const amount = label(`+${this.settlement.rewards[key]}`, 'number', { fontSize: 30, fill: 0xffd23f });
-      amount.y = 28;
-      const name = label(meta.name, 'dark', { fontSize: 15, fill: 0x8a6bd1 });
-      name.y = 58;
+      icon.y = -32;
+      const amount = label(`+${this.settlement.rewards[key].toLocaleString('en-US')}`, 'number', { fontSize: 30, fill: 0xffffff });
+      amount.y = 20;
+      const name = label(meta.name, 'small', { fontSize: 14, fill: 0x7a3500, fontWeight: '700' });
+      name.y = 48;
       card.addChild(bg, icon, amount, name);
+      if (special) {
+        const tagBg = new Graphics().roundRect(-26, -13, 52, 26, 11).fill(0xff4f8b).stroke({ color: 0x2a1638, width: 3 });
+        const tagText = label('NEW!', 'number', { fontSize: 14, fill: 0xffffff });
+        const tag = new Container();
+        tag.addChild(tagBg, tagText);
+        tag.position.set(cardWidth / 2 - 22, -75);
+        tag.rotation = 0.12;
+        card.addChild(tag);
+      }
       card.position.set(origin.x, origin.y);
       card.scale.set(0.2);
       card.alpha = 0;
@@ -377,7 +388,7 @@ export class ResultScreen extends Container {
       const pieces = key === 'coins' ? 10 : key === 'gems' ? 6 : Math.min(3, amount);
       const shares = splitAmount(amount, pieces);
       const target = this.hud.iconPosition(REWARD_META[key].currency);
-      const start = card.toGlobal({ x: 0, y: -26 });
+      const start = card.toGlobal({ x: 0, y: -32 });
       const startDelay = cardIndex * 0.18;
       // The card itself pops away once its icons are out.
       gsap.timeline({ delay: startDelay })

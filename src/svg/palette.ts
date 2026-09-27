@@ -4,54 +4,53 @@ export const INK = '#2a1638';
 
 export const GOLD = { light: '#fff3b0', base: '#ffd23f', dark: '#e0930f', deep: '#a8620a' };
 
-export const SILVER = { light: '#ffffff', base: '#d3dcea', dark: '#8795ad', deep: '#56637a' };
-
 export type TierId = 0 | 1 | 2 | 3;
+
+export type Shades = { light: string; base: string; dark: string };
 
 export type TierColors = {
   name: string;
-  /** Chest body. */
-  light: string;
-  base: string;
-  dark: string;
-  rim: string;
-  /** Lid body; legendary uses gold. */
-  lidLight: string;
-  lidBase: string;
-  lidDark: string;
-  /** Bands, straps and lock: silver for the lower tiers, gold above. */
-  metal: 'silver' | 'gold';
-  /** Stud on the lid. */
-  gem: string;
+  /** Painted planks: front shades, plus the darker left side. */
+  body: Shades & { side: string; line: string };
+  /** Rim band, straps, feet and lock plate. */
+  trim: Shades;
+  /** Legendary chests wear a star on the lock. */
+  star: boolean;
   /** Background glow for the result screen. */
   bgInner: string;
   bgOuter: string;
   glow: number;
 };
 
+const YELLOW_TRIM: Shades = { light: '#fff6b8', base: '#f7de6c', dark: '#d8ac34' };
+
 export const TIERS: Record<TierId, TierColors> = {
   0: {
     name: '普通宝箱',
-    light: '#8ff5c8', base: '#39d98f', dark: '#169a5f', rim: '#0d6b41',
-    lidLight: '#8ff5c8', lidBase: '#39d98f', lidDark: '#169a5f', metal: 'silver', gem: '#8ff5c8',
+    body: { light: '#86f2b8', base: '#3fd98a', dark: '#21ad68', side: '#1f9c5e', line: '#157a48' },
+    trim: YELLOW_TRIM,
+    star: false,
     bgInner: '#1f7a74', bgOuter: '#0b2b33', glow: 0x6ff5c0,
   },
   1: {
     name: '稀有宝箱',
-    light: '#9ad0ff', base: '#3b9cff', dark: '#1c5fd0', rim: '#123f96',
-    lidLight: '#9ad0ff', lidBase: '#3b9cff', lidDark: '#1c5fd0', metal: 'silver', gem: '#6fd2ff',
+    body: { light: '#7cc8ff', base: '#3a9bf0', dark: '#2275d6', side: '#1f66c0', line: '#154f9e' },
+    trim: YELLOW_TRIM,
+    star: false,
     bgInner: '#2360c9', bgOuter: '#0b1740', glow: 0x7cc4ff,
   },
   2: {
     name: '史诗宝箱',
-    light: '#dfb3ff', base: '#b35cff', dark: '#7a2fd6', rim: '#521c9e',
-    lidLight: '#dfb3ff', lidBase: '#b35cff', lidDark: '#7a2fd6', metal: 'gold', gem: '#ff5fa2',
+    body: { light: '#cf9bff', base: '#a55cf0', dark: '#8038d0', side: '#7030bb', line: '#56219a' },
+    trim: { light: '#ffeaa0', base: '#f4c64a', dark: '#c98f1c' },
+    star: false,
     bgInner: '#6a2bc4', bgOuter: '#1b0b3d', glow: 0xd09bff,
   },
   3: {
     name: '传说宝箱',
-    light: '#ffb1d3', base: '#ff5fa2', dark: '#d8337c', rim: '#9c1c57',
-    lidLight: '#ffb1d3', lidBase: '#ff5fa2', lidDark: '#d8337c', metal: 'gold', gem: '#6fe7ff',
+    body: { light: '#fff28a', base: '#ffd23f', dark: '#f5ab1a', side: '#eb9b12', line: '#c97a08' },
+    trim: { light: '#ffc0d8', base: '#ff72aa', dark: '#e0457f' },
+    star: true,
     bgInner: '#d8741f', bgOuter: '#3a1206', glow: 0xffd66b,
   },
 };
