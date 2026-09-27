@@ -2,7 +2,7 @@
   "name": "pixi-gomoku",
   "version": "0.1.0",
   "private": true,
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "type": "module",
   "description": "Open-source PixiJS Gomoku built with Claude Code and Opus: AI opponents, WebRTC multiplayer, animated rewards and cross-device saves.",
   "scripts": {

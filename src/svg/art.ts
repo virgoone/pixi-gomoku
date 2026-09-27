@@ -709,6 +709,26 @@ export const AVATARS = {
     <circle cx="45" cy="63" r="7" fill="${INK}"/><circle cx="75" cy="63" r="7" fill="${INK}"/>
     <circle cx="47" cy="60" r="2.2" fill="#fff"/><circle cx="77" cy="60" r="2.2" fill="#fff"/>
     <path d="M54 72 L60 84 L66 72 Z" fill="#ffb43a" stroke="${INK}" stroke-width="3.5" stroke-linejoin="round"/>`),
+  /** Dragon sage, the master opponent: jade head, golden horns and whiskers, flame mane. */
+  master: () =>
+    avatarFrame('#ffb199', '#d83b3b', `
+    <path d="M28 60 L8 46 L20 66 L4 72 L22 80 L10 94 L32 88 Z" fill="#ff8a2a" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M92 60 L112 46 L100 66 L116 72 L98 80 L110 94 L88 88 Z" fill="#ff8a2a" stroke="${INK}" stroke-width="4" stroke-linejoin="round"/>
+    <path d="M44 40 Q36 24 24 14 M36 28 Q28 28 22 32" fill="none" stroke="${INK}" stroke-width="11" stroke-linecap="round"/>
+    <path d="M76 40 Q84 24 96 14 M84 28 Q92 28 98 32" fill="none" stroke="${INK}" stroke-width="11" stroke-linecap="round"/>
+    <path d="M44 40 Q36 24 24 14 M36 28 Q28 28 22 32" fill="none" stroke="#ffd23f" stroke-width="5" stroke-linecap="round"/>
+    <path d="M76 40 Q84 24 96 14 M84 28 Q92 28 98 32" fill="none" stroke="#ffd23f" stroke-width="5" stroke-linecap="round"/>
+    <path d="M24 72 Q24 36 60 36 Q96 36 96 72 Q96 104 60 106 Q24 104 24 72 Z" fill="#43c07a" stroke="${INK}" stroke-width="5"/>
+    <circle cx="60" cy="46" r="5" fill="#ffd23f" stroke="${INK}" stroke-width="3"/>
+    <path d="M32 52 L52 58 M88 52 L68 58" stroke="${INK}" stroke-width="5" stroke-linecap="round"/>
+    <circle cx="44" cy="66" r="9" fill="#fff" stroke="${INK}" stroke-width="4"/><circle cx="76" cy="66" r="9" fill="#fff" stroke="${INK}" stroke-width="4"/>
+    <circle cx="46" cy="67" r="4.5" fill="${INK}"/><circle cx="74" cy="67" r="4.5" fill="${INK}"/>
+    <circle cx="47" cy="65" r="1.5" fill="#fff"/><circle cx="75" cy="65" r="1.5" fill="#fff"/>
+    <ellipse cx="60" cy="90" rx="24" ry="14" fill="#b8f0c8" stroke="${INK}" stroke-width="4"/>
+    <ellipse cx="52" cy="86" rx="3" ry="2.4" fill="${INK}"/><ellipse cx="68" cy="86" rx="3" ry="2.4" fill="${INK}"/>
+    <path d="M51 96 Q60 101 69 96" fill="none" stroke="${INK}" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M36 90 Q20 88 14 100 Q10 110 22 112 M84 90 Q100 88 106 100 Q110 110 98 112" fill="none" stroke="${INK}" stroke-width="7" stroke-linecap="round"/>
+    <path d="M36 90 Q20 88 14 100 Q10 110 22 112 M84 90 Q100 88 106 100 Q110 110 98 112" fill="none" stroke="#ffd23f" stroke-width="3.5" stroke-linecap="round"/>`),
   /** The local player. */
   you: () =>
     avatarFrame('#9ef0ff', '#29a9d6', `

@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import { chestTier, type Outcome, settle } from '../src/result/scoring';
+import { ladderPoints } from '../src/result/ladder';
+import { BLACK } from '../src/gomoku/rules';
 
 const base: Outcome = { mode: 'ai', winner: 1, myStone: 1, totalMoves: 41, winnerMoves: 21, reason: 'five', brain: 'fox' };
 
@@ -31,5 +33,14 @@ describe('settlement', () => {
     expect(settle({ ...base, winner: null, reason: 'draw' }, 2)).toMatchObject({ kind: 'draw', streak: 2 });
     const local = settle({ ...base, mode: 'local', myStone: null, winner: 2, brain: undefined }, 3);
     expect(local).toMatchObject({ kind: 'win', headline: '白方胜利！', streak: 3 });
+  });
+});
+
+describe('master opponent', () => {
+  test('a win over the master earns the top chest and 10 ladder points', () => {
+    const outcome: Outcome = { mode: 'ai', brain: 'master', winner: BLACK, myStone: BLACK, totalMoves: 61, winnerMoves: 31, reason: 'five' };
+    expect(chestTier(outcome, 1)).toBe(3);
+    expect(ladderPoints('win', 'ai', 'master')).toBe(10);
+    expect(ladderPoints('loss', 'ai', 'master')).toBe(0);
   });
 });

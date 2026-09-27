@@ -22,6 +22,8 @@ export class Button extends Container {
   private face = new Container();
   private skinSprite: NineSliceSprite;
   private text;
+  /** The icon (last) and its ink outline copies, with their offsets. */
+  private iconParts: Array<{ sprite: Sprite; dx: number; dy: number }> = [];
   private enabled = true;
   private readonly onPress: () => void;
 
@@ -53,10 +55,7 @@ export class Button extends Container {
       icon.anchor.set(0.5);
       icon.tint = color;
       icon.width = icon.height = height * 0.38;
-      const gap = 10;
-      const total = icon.width + gap + this.text.width;
-      icon.position.set(-total / 2 + icon.width / 2, this.text.y);
-      this.text.x = -total / 2 + icon.width + gap + this.text.width / 2;
+      this.iconParts.push({ sprite: icon, dx: 0, dy: 0 });
       if (outlined) {
         // A fattened ink copy behind the icon stands in for an outline.
         const offsets = [[-2, 0], [2, 0], [0, -2], [0, 2], [0, 3]];
@@ -65,11 +64,12 @@ export class Button extends Container {
           edge.anchor.set(0.5);
           edge.tint = INK;
           edge.width = edge.height = icon.width;
-          edge.position.set(icon.x + ox, icon.y + oy);
           this.face.addChild(edge);
+          this.iconParts.unshift({ sprite: edge, dx: ox, dy: oy });
         }
       }
       this.face.addChild(icon);
+      this.layoutIcon();
     }
     this.face.addChild(this.text);
     this.addChild(this.face);
@@ -103,6 +103,18 @@ export class Button extends Container {
 
   setText(text: string) {
     this.text.text = text;
+    this.layoutIcon();
+  }
+
+  /** Centre the icon and text as a pair; rerun whenever the text width changes. */
+  private layoutIcon() {
+    const icon = this.iconParts.at(-1)?.sprite;
+    if (!icon) return;
+    const gap = 10;
+    const total = icon.width + gap + this.text.width;
+    const x = -total / 2 + icon.width / 2;
+    for (const part of this.iconParts) part.sprite.position.set(x + part.dx, this.text.y + part.dy);
+    this.text.x = -total / 2 + icon.width + gap + this.text.width / 2;
   }
 
   setEnabled(enabled: boolean) {
