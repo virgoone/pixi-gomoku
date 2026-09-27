@@ -493,27 +493,41 @@ export const backdrop = (inner: string, outer: string) => {
 /** Chunky 3D pill. 240×96 with 40px corners; used as a nine-slice (slice 44). */
 export const buttonSkin = (id: SkinId) => {
   const skin = SKINS[id];
+  // Reference look: bright gradient face, thin ink outline, a dark base under it
+  // and a darker lip along the bottom of the face.
   return svg(240, 96, `
-  <defs><linearGradient id="t" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="${skin.top}"/><stop offset="1" stop-color="${skin.bottom}"/>
-  </linearGradient></defs>
-  <rect x="3" y="12" width="234" height="80" rx="38" fill="${INK}"/>
-  <rect x="3" y="8" width="234" height="80" rx="38" fill="${skin.edge}" stroke="${INK}" stroke-width="5"/>
-  <rect x="3" y="3" width="234" height="76" rx="37" fill="url(#t)" stroke="${INK}" stroke-width="5"/>
-  <rect x="26" y="12" width="188" height="14" rx="7" fill="#fff" fill-opacity="0.45"/>`);
+  <defs>
+    <linearGradient id="t" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${skin.top}"/><stop offset="1" stop-color="${skin.bottom}"/>
+    </linearGradient>
+    <clipPath id="face"><rect x="4" y="4" width="232" height="78" rx="30"/></clipPath>
+  </defs>
+  <rect x="4" y="12" width="232" height="80" rx="30" fill="${INK}"/>
+  <rect x="4" y="4" width="232" height="78" rx="30" fill="url(#t)"/>
+  <g clip-path="url(#face)">
+    <rect x="0" y="68" width="240" height="20" fill="${skin.edge}"/>
+    <rect x="20" y="10" width="200" height="12" rx="6" fill="#fff" fill-opacity="0.55"/>
+  </g>
+  <rect x="4" y="4" width="232" height="78" rx="30" fill="none" stroke="${INK}" stroke-width="4"/>`);
 };
 
 /** Round icon button face, 96×96. */
 export const roundSkin = (id: SkinId) => {
   const skin = SKINS[id];
   return svg(96, 96, `
-  <defs><linearGradient id="t" x1="0" y1="0" x2="0" y2="1">
-    <stop offset="0" stop-color="${skin.top}"/><stop offset="1" stop-color="${skin.bottom}"/>
-  </linearGradient></defs>
-  <circle cx="48" cy="52" r="42" fill="${INK}"/>
-  <circle cx="48" cy="49" r="42" fill="${skin.edge}" stroke="${INK}" stroke-width="5"/>
-  <circle cx="48" cy="45" r="40" fill="url(#t)" stroke="${INK}" stroke-width="5"/>
-  <ellipse cx="48" cy="22" rx="24" ry="8" fill="#fff" fill-opacity="0.4"/>`);
+  <defs>
+    <linearGradient id="t" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${skin.top}"/><stop offset="1" stop-color="${skin.bottom}"/>
+    </linearGradient>
+    <clipPath id="face"><circle cx="48" cy="44" r="40"/></clipPath>
+  </defs>
+  <circle cx="48" cy="51" r="40" fill="${INK}"/>
+  <circle cx="48" cy="44" r="40" fill="url(#t)"/>
+  <g clip-path="url(#face)">
+    <rect x="0" y="72" width="96" height="20" fill="${skin.edge}"/>
+    <ellipse cx="48" cy="20" rx="24" ry="8" fill="#fff" fill-opacity="0.4"/>
+  </g>
+  <circle cx="48" cy="44" r="40" fill="none" stroke="${INK}" stroke-width="4"/>`);
 };
 
 /** Glassy dark panel for popups and cards; nine-slice (slice 48). */

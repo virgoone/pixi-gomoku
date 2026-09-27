@@ -3,7 +3,7 @@ import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
 import { tex } from '../app/textures';
-import { SKINS, type SkinId } from '../svg/palette';
+import { INK, SKINS, type SkinId } from '../svg/palette';
 import type { IconId } from '../svg/art';
 import { label } from './Label';
 
@@ -39,8 +39,15 @@ export class Button extends Container {
     this.face.addChild(this.skinSprite);
 
     const color = SKINS[skin].text;
-    this.text = label(options.text, 'button', { fontSize: options.fontSize ?? Math.round(height * 0.36), fill: color });
-    this.text.y = -height * 0.05;
+    // As in the reference: white lettering with a thick ink outline; the white skin keeps dark text.
+    const outlined = skin !== 'white';
+    const fontSize = options.fontSize ?? Math.round(height * 0.36);
+    this.text = label(options.text, 'button', {
+      fontSize,
+      fill: color,
+      ...(outlined ? { stroke: { color: INK, width: Math.max(4, Math.round(fontSize * 0.24)), join: 'round' as const } } : {}),
+    });
+    this.text.y = -height * 0.07;
     if (options.icon) {
       const icon = new Sprite(tex(`icon-${options.icon}`));
       icon.anchor.set(0.5);
@@ -50,6 +57,18 @@ export class Button extends Container {
       const total = icon.width + gap + this.text.width;
       icon.position.set(-total / 2 + icon.width / 2, this.text.y);
       this.text.x = -total / 2 + icon.width + gap + this.text.width / 2;
+      if (outlined) {
+        // A fattened ink copy behind the icon stands in for an outline.
+        const offsets = [[-2, 0], [2, 0], [0, -2], [0, 2], [0, 3]];
+        for (const [ox, oy] of offsets) {
+          const edge = new Sprite(icon.texture);
+          edge.anchor.set(0.5);
+          edge.tint = INK;
+          edge.width = edge.height = icon.width;
+          edge.position.set(icon.x + ox, icon.y + oy);
+          this.face.addChild(edge);
+        }
+      }
       this.face.addChild(icon);
     }
     this.face.addChild(this.text);

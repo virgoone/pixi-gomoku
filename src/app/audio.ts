@@ -75,6 +75,11 @@ export const sfx = {
     tone(300, 0.35, { type: 'sawtooth', gain: 0.06, slide: 1200 });
     [784, 988, 1175].forEach((f, i) => tone(f, 0.25, { type: 'triangle', gain: 0.12, delay: 0.25 + i * 0.06 }));
   },
+  /** Rising whine while the chest rattles before opening. */
+  charge: () => {
+    tone(180, 0.8, { type: 'sawtooth', gain: 0.05, slide: 900 });
+    noise(0.8, 0.12, 1800);
+  },
   open: () => {
     noise(0.3, 0.3, 900);
     [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.6, { type: 'triangle', gain: 0.12, delay: 0.05 + i * 0.05 }));

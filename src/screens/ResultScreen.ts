@@ -9,6 +9,7 @@ import { tex } from '../app/textures';
 import { BLACK, type Stone, WHITE } from '../gomoku/rules';
 import type { NetMessage, OnlineLink } from '../net/online';
 import { Chest } from '../result/Chest';
+import { Effects } from '../result/Effects';
 import { type Outcome, type Rewards, type Settlement, settle } from '../result/scoring';
 import { TIERS, type TierId } from '../svg/palette';
 import { Backdrop } from '../ui/Backdrop';
@@ -16,6 +17,7 @@ import { Button } from '../ui/Button';
 import { Confetti } from '../ui/Confetti';
 import { Hud } from '../ui/Hud';
 import { label } from '../ui/Label';
+import { PopTitle } from '../ui/PopTitle';
 import { toast } from '../ui/Toast';
 import { type GameConfig, GameScreen } from './GameScreen';
 import { HomeScreen } from './HomeScreen';
@@ -53,24 +55,31 @@ export class ResultScreen extends Container {
   private chest: Chest | null = null;
   private badge: Sprite | null = null;
   private eyebrow: Text;
-  private heading: Text;
+  private heading: PopTitle;
   private detail: Text;
   private tapHint: Text;
   private cardsLayer = new Container();
   private buttonsLayer = new Container();
   private confetti = new Confetti();
+  private fx = new Effects();
   private hud = new Hud();
   private w = 0;
   private h = 0;
   private time = 0;
   private waitingForTap: (() => void) | null = null;
+  /** A tap during the upgrades: speed them up and open straight after. */
+  private tapQueued = false;
+  private hurry = false;
+  private acceptEarlyTap = false;
+  private twinkling = false;
+  private twinkleClock = 0;
   private collected = false;
   private credited = false;
   private rematchSent = false;
   private rematchReceived = false;
   private unsubscribers: Array<() => void> = [];
   private keyHandler = (event: KeyboardEvent) => {
-    if (event.key === 'Enter' || event.key === ' ') this.waitingForTap?.();
+    if (event.key === 'Enter' || event.key === ' ') this.onTap();
   };
 
   constructor(
@@ -98,10 +107,12 @@ export class ResultScreen extends Container {
     this.flash.blendMode = 'add';
     this.flash.alpha = 0;
 
-    this.eyebrow = label(win ? this.settlement.headline : '', 'heading', { fontSize: 24, fill: 0xfff3b0 });
-    this.heading = label(win ? TIERS[tier].name : this.settlement.headline, 'title', { fontSize: 64 });
+    this.eyebrow = label(win ? this.settlement.headline : '', 'heading', { fontSize: 24, fill: 0xffffff });
+    this.heading = new PopTitle(64);
+    void this.heading.set(win ? TIERS[tier].name : this.settlement.headline, win ? TIERS[tier].title : 0xffffff, false);
+    this.heading.alpha = 0;
     this.detail = label(this.settlement.detail, 'body', { fontSize: 17, fill: 0xf1eaff });
-    this.tapHint = label('点击开启', 'heading', { fontSize: 26 });
+    this.tapHint = label('点击开启', 'heading', { fontSize: 26, fill: 0xffffff });
     this.tapHint.alpha = 0;
 
     this.stage.addChild(this.ring, this.burstRing);
@@ -115,9 +126,9 @@ export class ResultScreen extends Container {
     }
     this.stage.addChild(this.flash);
 
-    this.addChild(this.backdrop, this.stage, this.eyebrow, this.heading, this.detail, this.tapHint, this.cardsLayer, this.buttonsLayer, this.confetti, this.hud);
+    this.addChild(this.backdrop, this.stage, this.eyebrow, this.heading, this.detail, this.tapHint, this.fx, this.cardsLayer, this.buttonsLayer, this.confetti, this.hud);
     this.eventMode = 'static';
-    this.on('pointertap', () => this.waitingForTap?.());
+    this.on('pointertap', () => this.onTap());
     window.addEventListener('keydown', this.keyHandler);
 
     if (online) this.listenOnline(online);
@@ -151,7 +162,7 @@ export class ResultScreen extends Container {
     const hudBottom = 16 + this.hud.totalHeight * hudScale;
     const headerTop = Math.max(64, height * 0.08, width < this.hud.totalWidth + 240 ? hudBottom + 34 : 0);
     this.eyebrow.scale.set(textScale);
-    this.heading.scale.set(textScale);
+    this.fitHeading(textScale);
     this.detail.scale.set(Math.min(textScale, (width - 32) / (this.detail.width / this.detail.scale.x)));
     this.eyebrow.position.set(width / 2, headerTop);
     this.heading.position.set(width / 2, headerTop + 52 * textScale);
@@ -197,74 +208,152 @@ export class ResultScreen extends Container {
     await gsap.fromTo(text.scale, { x: text.scale.x * 0.4, y: text.scale.y * 0.4 }, { x: text.scale.x, y: text.scale.y, duration: 0.45, ease: 'back.out(3)' });
   }
 
+  private textScale = 1;
+
+  private fitHeading(textScale = this.textScale) {
+    this.textScale = textScale;
+    this.heading.scale.set(Math.min(textScale, (this.w - 24) / Math.max(1, this.heading.textWidth)));
+  }
+
+  private setHeading(text: string, fill: number) {
+    this.heading.alpha = 1;
+    const done = this.heading.set(text, fill);
+    this.fitHeading();
+    return done;
+  }
+
+  private onTap() {
+    if (this.waitingForTap) {
+      this.waitingForTap();
+      return;
+    }
+    if (this.acceptEarlyTap && !this.tapQueued) {
+      this.tapQueued = true;
+      this.hurry = true;
+      gsap.to(this.tapHint, { alpha: 0.4, duration: 0.15 });
+    }
+  }
+
+  /** A beat of the sequence; much shorter once the player has tapped to skip ahead. */
+  private pause(seconds: number) {
+    return wait(this.hurry ? seconds * 0.25 : seconds);
+  }
+
+  private get chestCenter() {
+    const chest = this.chest;
+    return chest ? chest.toGlobal({ x: 0, y: -110 }) : { x: this.w / 2, y: this.h / 2 };
+  }
+
   private async playChest(finalTier: TierId) {
     const chest = this.chest;
     if (!chest) return;
     const scale = this.chestScale;
     this.detail.alpha = 0;
-    gsap.to(this.detail, { alpha: 1, duration: 0.4, delay: 0.3 });
+    gsap.to(this.detail, { alpha: 1, duration: 0.4, delay: 0.5 });
     void this.popText(this.eyebrow);
-    void this.popText(this.heading);
+    void this.setHeading(TIERS[0].name, TIERS[0].title);
 
-    // Drop in.
-    chest.y = -this.h;
-    await gsap.to(chest, { y: 0, duration: 0.5, ease: 'power3.in' });
+    // Falls from above, through the title, and lands with a squash.
+    chest.y = -this.floor - 240 * scale;
+    await gsap.to(chest, { y: 0, duration: 0.42, ease: 'power2.in' });
     if (this.destroyed) return;
     sfx.land();
     this.ringPulse();
     void chest.land();
-    await wait(0.55);
+    const ground = chest.toGlobal({ x: 0, y: -10 });
+    this.fx.ring(ground.x, ground.y, { from: 60 * scale, to: 220 * scale, width: 3, duration: 0.5, alpha: 0.7 });
+    // "Tap to open" shows from the start, as in the reference.
+    this.tapHint.alpha = 0;
+    gsap.to(this.tapHint, { alpha: 1, duration: 0.3 });
+    const hintTween = gsap.to(this.tapHint.scale, { x: this.tapHint.scale.x * 1.08, y: this.tapHint.scale.y * 1.08, duration: 0.55, yoyo: true, repeat: -1, ease: 'sine.inOut' });
+    this.acceptEarlyTap = true;
+    this.twinkling = true;
+    this.cursor = 'pointer';
+    await this.pause(1.0);
     if (this.destroyed) return;
 
-    // Upgrade one tier at a time.
+    // Upgrade one tier at a time: crouch, hop, white-hot flash with a shock ring, land.
     for (let tier = 1; tier <= finalTier; tier += 1) {
-      this.eyebrow.text = '升级！';
-      await chest.charge(0.4);
+      await chest.hop();
       if (this.destroyed) return;
-      this.flashBurst(TIERS[tier as TierId].glow);
-      sfx.upgrade();
-      speak('升级！', { rate: 1.2, pitch: 1.3 });
-      chest.setTier(tier as TierId);
-      this.backdrop.setTexture(`backdrop-tier-${tier}`, 0.35);
-      this.backdrop.setRays({ tint: TIERS[tier as TierId].glow });
-      this.ring.tint = TIERS[tier as TierId].glow;
-      this.heading.text = TIERS[tier as TierId].name;
-      void this.popText(this.heading);
-      this.sparkleBurst(10 + tier * 6, scale);
-      await wait(0.7);
+      this.upgradeFlash(tier as TierId);
+      await chest.drop();
+      if (this.destroyed) return;
+      await this.pause(1.1);
       if (this.destroyed) return;
     }
 
-    // Wait for a tap.
-    this.tapHint.alpha = 1;
-    const hintTween = gsap.to(this.tapHint.scale, { x: this.tapHint.scale.x * 1.1, y: this.tapHint.scale.y * 1.1, duration: 0.5, yoyo: true, repeat: -1, ease: 'sine.inOut' });
-    const idle = chest.idle();
-    this.cursor = 'pointer';
-    await new Promise<void>((resolve) => {
-      this.waitingForTap = resolve;
-    });
-    this.waitingForTap = null;
+    if (!this.tapQueued) {
+      await new Promise<void>((resolve) => {
+        this.waitingForTap = resolve;
+      });
+      this.waitingForTap = null;
+    }
     if (this.destroyed) return;
+    this.acceptEarlyTap = false;
+    this.twinkling = false;
     this.cursor = 'default';
     hintTween.kill();
-    idle.kill();
-    gsap.to(chest.rig, { y: 0, duration: 0.1 });
     gsap.to(this.tapHint, { alpha: 0, duration: 0.2 });
 
-    // Open.
+    // Charge: violent rattle with speed lines streaking out.
+    sfx.charge();
+    const center = this.chestCenter;
+    const lines = window.setInterval(() => {
+      if (!this.destroyed) this.fx.speedLines(center.x, center.y, 170 * scale, 3);
+    }, 45);
+    await chest.shake(0.8);
+    window.clearInterval(lines);
+    if (this.destroyed) return;
+
+    // Burst open behind a full-screen flash.
+    this.fx.screenFlash(this.w, this.h, 0.9);
     sfx.open();
     speak(`恭喜获得${TIERS[finalTier].name}！`, { delay: 0.2 });
-    this.flashBurst(0xfff3b0, 1.6);
-    this.backdrop.setRays({ alpha: 0.85, scale: this.backdrop.rays.scale.x * 1.25 }, 0.6);
-    await chest.open();
-    if (this.destroyed) return;
+    this.backdrop.setRays({ alpha: 0.9, scale: this.backdrop.rays.scale.x * 1.3 }, 0.6);
+    const opening = chest.open();
     const mouth = chest.toGlobal(chest.mouth);
-    this.confetti.burst(mouth.x, mouth.y, 110, Math.min(1100, this.h * 1.3));
+    const far = Math.hypot(this.w, this.h) * 0.75;
+    for (const [index, width] of [5, 3, 2].entries()) {
+      this.fx.ring(center.x, center.y, { from: 80 * scale, to: far, width, duration: 1.1, delay: 0.12 + index * 0.14, alpha: 0.85 });
+    }
+    window.setTimeout(() => {
+      if (this.destroyed) return;
+      this.fx.loot(mouth.x, mouth.y, 30, Math.min(1000, this.h * 1.2));
+      this.confetti.burst(mouth.x, mouth.y, 110, Math.min(1100, this.h * 1.3));
+    }, 140);
     this.eyebrow.text = '你获得了';
     void this.popText(this.eyebrow);
-    await this.showRewards(mouth);
+    await opening;
+    if (this.destroyed) return;
+    await wait(0.25);
+    if (this.destroyed) return;
+    await this.showRewards(chest.toGlobal(chest.mouth));
     if (this.destroyed) return;
     this.showCollect();
+  }
+
+  /** The instant of an upgrade. */
+  private upgradeFlash(tier: TierId) {
+    const chest = this.chest;
+    if (!chest) return;
+    const scale = this.chestScale;
+    const colors = TIERS[tier];
+    const center = this.chestCenter;
+    chest.flashWhite();
+    sfx.upgrade();
+    speak('升级！', { rate: 1.2, pitch: 1.3 });
+    this.fx.ring(center.x, center.y, { from: 50 * scale, to: 330 * scale, width: 5, duration: 0.6 });
+    this.fx.ring(center.x, center.y, { from: 30 * scale, to: 240 * scale, width: 3, duration: 0.55, delay: 0.08 });
+    this.flashBurst(colors.glow);
+    chest.setTier(tier);
+    this.backdrop.setTexture(`backdrop-tier-${tier}`, 0.08);
+    this.backdrop.setRays({ tint: colors.glow });
+    this.ring.tint = colors.glow;
+    this.eyebrow.text = '升级！';
+    void this.popText(this.eyebrow);
+    void this.setHeading(colors.name, colors.title);
+    this.sparkleBurst(10 + tier * 6, scale);
   }
 
   private async playBadge() {
@@ -272,7 +361,7 @@ export class ResultScreen extends Container {
     if (!badge) return;
     this.eyebrow.text = this.settlement.kind === 'draw' ? '势均力敌' : '再接再厉';
     void this.popText(this.eyebrow);
-    void this.popText(this.heading);
+    void this.setHeading(this.settlement.headline, 0xffffff);
     badge.y = -this.h;
     badge.rotation = -0.3;
     await gsap.to(badge, { y: 0, rotation: 0, duration: 0.6, ease: 'bounce.out' });
@@ -350,20 +439,47 @@ export class ResultScreen extends Container {
         card.addChild(tag);
       }
       card.position.set(origin.x, origin.y);
-      card.scale.set(0.2);
+      card.scale.set(0.4);
       card.alpha = 0;
       card.label = key;
       this.cardsLayer.addChild(card);
       const tx = -total / 2 + cardWidth / 2 + index * (cardWidth + gap);
+      const value = this.settlement.rewards[key];
+      amount.text = '+0';
       sfx.reward();
-      gsap.to(card, { alpha: 1, duration: 0.15 });
-      gsap.to(card, { x: tx, y: 0, duration: 0.55, ease: 'back.out(1.4)' });
-      gsap.to(card.scale, { x: 1, y: 1, duration: 0.55, ease: 'back.out(2)' });
-      gsap.fromTo(card, { rotation: -0.4 }, { rotation: 0, duration: 0.55, ease: 'back.out(2)' });
-      await wait(0.28);
+      // Pops up out of the chest, then drops into its slot and counts up.
+      const tl = gsap.timeline();
+      tl.to(card, { alpha: 1, duration: 0.08 });
+      tl.to(card, { y: origin.y - 150, duration: 0.3, ease: 'power2.out' }, 0);
+      tl.to(card.scale, { x: 0.85, y: 0.85, duration: 0.3, ease: 'power2.out' }, 0);
+      tl.fromTo(card, { rotation: (index - 1) * 0.25 }, { rotation: 0, duration: 0.6 }, 0);
+      tl.to(card, { x: tx, y: 0, duration: 0.34, ease: 'power2.in' }, 0.3);
+      tl.to(card.scale, { x: 1, y: 1, duration: 0.34 }, 0.3);
+      tl.to(card.scale, { x: 1.12, y: 0.86, duration: 0.07 });
+      tl.to(card.scale, { x: 1, y: 1, duration: 0.4, ease: 'elastic.out(1, 0.45)' });
+      tl.add(() => {
+        if (this.destroyed) return;
+        sfx.coin();
+        const counter = { v: 0 };
+        gsap.to(counter, {
+          v: value,
+          duration: Math.min(0.7, 0.25 + value / 2000),
+          ease: 'power1.out',
+          onUpdate: () => {
+            if (!amount.destroyed) amount.text = `+${Math.round(counter.v).toLocaleString('en-US')}`;
+          },
+        });
+        if (special) {
+          const at = card.toGlobal({ x: 0, y: 0 });
+          this.fx.ring(at.x, at.y, { from: 60 * this.cardsLayer.scale.x, to: 130 * this.cardsLayer.scale.x, width: 4, color: 0xfff3a0, duration: 0.6 });
+          const tag = card.children.at(-1);
+          if (tag) gsap.fromTo(tag.scale, { x: 0, y: 0 }, { x: 1, y: 1, duration: 0.4, ease: 'back.out(3)' });
+        }
+      }, 0.64);
+      await wait(this.hurry ? 0.3 : 0.42);
       if (this.destroyed) return;
     }
-    await wait(0.4);
+    await wait(0.9);
   }
 
   private showCollect() {
@@ -498,7 +614,16 @@ export class ResultScreen extends Container {
     this.time += ticker.deltaMS / 1000;
     this.backdrop.update(ticker);
     this.confetti.update(ticker);
+    this.fx.update(ticker);
     this.chest?.pulseGlow(this.time);
+    if (this.twinkling && this.chest) {
+      this.twinkleClock += ticker.deltaMS / 1000;
+      while (this.twinkleClock > 0.12) {
+        this.twinkleClock -= 0.12;
+        const c = this.chestCenter;
+        this.fx.twinkle(c.x, c.y, 240 * this.chestScale);
+      }
+    }
     this.ring.alpha = 0.75 + 0.25 * Math.sin(this.time * 3);
   }
 
