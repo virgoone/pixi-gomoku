@@ -4,6 +4,7 @@ import { appendFile, readFile, readdir } from 'node:fs/promises';
 import { setTimeout } from 'node:timers/promises';
 
 let result = JSON.parse(await readFile(process.env.DEPLOY_RESULT, 'utf8'));
+if (result.deploy_id) result = { id: result.deploy_id };
 assert.ok(result.id, 'Netlify must return a deploy ID');
 for (let attempt = 0; result.state !== 'ready' && attempt < 60; attempt += 1) {
   assert.ok(!['error', 'failed'].includes(result.state), result.error_message || 'Deploy failed');
@@ -16,6 +17,7 @@ for (let attempt = 0; result.state !== 'ready' && attempt < 60; attempt += 1) {
   result = await response.json();
 }
 assert.equal(result.state, 'ready', 'Deploy must become ready within five minutes');
+if (process.env.GITHUB_SHA) assert.equal(result.commit_ref, process.env.GITHUB_SHA, 'Netlify must build the tested commit');
 const base = result.links?.permalink ?? result.deploy_ssl_url;
 assert.ok(base?.startsWith('https://'), 'Netlify must return an HTTPS deploy URL');
 
@@ -39,6 +41,9 @@ async function verify(directory, prefix = '') {
 }
 
 const count = await verify('dist');
+const session = await fetch(`${base}/api/auth/session`, { signal: AbortSignal.timeout(30_000) });
+assert.equal(session.status, 200, 'The authentication function must be deployed and configured');
+assert.deepEqual(await session.json(), { user: null });
 console.log(`Verified ${count} published files against the tested build: ${base}`);
 if (process.env.GITHUB_STEP_SUMMARY) {
   await appendFile(process.env.GITHUB_STEP_SUMMARY,

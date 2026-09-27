@@ -6,6 +6,9 @@ import type { TierId } from '../svg/palette';
 export type Mode = 'ai' | 'local' | 'online';
 
 export type Outcome = {
+  /** Stable identity and completion time for offline / multi-device synchronization. */
+  gameId?: string;
+  finishedAt?: number;
   mode: Mode;
   /** Null on a draw. */
   winner: Stone | null;
@@ -17,6 +20,10 @@ export type Outcome = {
   reason: 'five' | 'resign' | 'draw' | 'disconnect';
   brain?: BrainId;
   opponentName?: string;
+  /** Every move in order, for the server to replay when the game is submitted to the leaderboard. */
+  moves?: Array<[number, number]>;
+  /** The colour that resigned, when the game ended by resignation. */
+  resignedBy?: Stone;
 };
 
 export type Rewards = { coins: number; gems: number; crowns: number };

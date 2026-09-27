@@ -39,6 +39,7 @@ export class GameScreen extends Container {
   private modeBar: TabBar;
   private board = new BoardView();
   private game = new GomokuGame();
+  private gameId = crypto.randomUUID();
   private cards = new Map<Stone, PlayerCard>();
   private status: Text;
   private menu: IconButton;
@@ -264,6 +265,8 @@ export class GameScreen extends Container {
     say(this.announcement(winner, myStone, reason), { delay: 0.35 });
 
     const outcome: Outcome = {
+      gameId: this.gameId,
+      finishedAt: Date.now(),
       mode: config.mode,
       winner,
       myStone,
@@ -272,6 +275,8 @@ export class GameScreen extends Container {
       reason,
       brain: config.mode === 'ai' ? config.brain : undefined,
       opponentName: config.mode === 'online' ? config.link.opponentName : undefined,
+      moves: this.game.history.map((move) => [move.x, move.y] as [number, number]),
+      resignedBy: reason === 'resign' && winner !== null ? opponent(winner) : undefined,
     };
     const delay = line ? 1800 : 900;
     window.setTimeout(() => {

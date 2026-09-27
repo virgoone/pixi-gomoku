@@ -2,6 +2,7 @@ import { Container, Graphics, NineSliceSprite, Sprite, type Text, type Ticker } 
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
+import { account, type SubmitResult } from '../net/account';
 import { say } from '../app/voice';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
@@ -78,6 +79,8 @@ export class ResultScreen extends Container {
   private rematchSent = false;
   private rematchReceived = false;
   private unsubscribers: Array<() => void> = [];
+  /** Leaderboard submission for this game, once sent. */
+  private ladder: Promise<SubmitResult | null> | null = null;
   private keyHandler = (event: KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') this.onTap();
   };
@@ -132,6 +135,38 @@ export class ResultScreen extends Container {
     window.addEventListener('keydown', this.keyHandler);
 
     if (online) this.listenOnline(online);
+    this.setupLadder();
+  }
+
+  // ---- leaderboard ----------------------------------------------------------------------
+
+  private get rated() {
+    return this.outcome.mode !== 'local' && Boolean(this.outcome.moves?.length);
+  }
+
+  /** Save every rated game locally; signed-in players also synchronize it. */
+  private setupLadder() {
+    if (!this.rated) return;
+    this.ladder = account.submit(this.outcome).catch(() => null);
+  }
+
+  /** Where the reward cards were: free once the rewards are collected. */
+  private get ladderToastY() {
+    const ui = Math.min(1, this.w / 520, this.h / 820);
+    return this.floor + 115 * ui;
+  }
+
+  /** Tell the player what the game did on the leaderboard. */
+  private announceLadder() {
+    void this.ladder?.then((result) => {
+      if (this.destroyed) return;
+      if (!result) {
+        toast(this, account.user ? '成绩已保存在本机，联网后自动同步' : '成绩已保存在本机，查看排行榜时登录同步', this.w, this.ladderToastY);
+        return;
+      }
+      const gained = result.points > 0 ? `排行榜 +${result.points} 分` : '成绩已记录';
+      toast(this, result.rank ? `${gained} · 第 ${result.rank} 名` : gained, this.w, this.ladderToastY);
+    });
   }
 
   private recordStats() {
@@ -546,6 +581,7 @@ export class ResultScreen extends Container {
   }
 
   private showNextButtons() {
+    this.announceLadder();
     const replay = new Button({ text: '再来一局', skin: 'green', width: 220, height: 80, icon: 'restart', onPress: () => this.onReplay(replay) });
     const home = new Button({ text: '回到主页', skin: 'white', width: 220, height: 80, icon: 'home', onPress: () => this.goHome() });
     replay.x = -120;

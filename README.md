@@ -2,8 +2,7 @@
 
 一个用 [PixiJS v8](https://pixijs.com/) 写的休闲五子棋小游戏。工程结构参照
 [pixijs/open-games](https://github.com/pixijs/open-games) 里的 *Puzzling Potions*
-（screens / popups / ui / navigation 分层），所有美术资源都是手写 SVG，在加载阶段栅格化成纹理，
-仓库里没有位图。
+（screens / popups / ui / navigation 分层），主要美术资源是手写 SVG，在加载阶段栅格化成纹理；排行榜空状态另用一张透明 PNG 插画。
 
 ## 玩法
 
@@ -60,6 +59,25 @@ npm run build      # tsc 类型检查 + vite 打包到 dist/
 
 `dev/art.html` 是所有 SVG 素材的预览页（`npm run dev` 后打开 `/dev/art.html`）。
 
+## 排行榜与登录
+
+- 邮箱验证码登录，流程与 meme 项目一致：输入邮箱 → 收到 6 位验证码（Resend 发信，10 分钟有效）→ 首次登录自动建号，会话是 HttpOnly Cookie。验证码与会话令牌只存哈希；每个验证码最多试 5 次（并发猜测也算数），同一邮箱 60 秒内只能发一次。
+- 登录后，人机与在线对局结束时自动提交整盘棋谱。服务器用同一套规则逐手复盘，只有真的连成五子（或对手认输且双方都下过）才算胜；积分：豆芽 1、狐狸阿明 3、猫头鹰棋圣 6、在线 5、平局 1。每人 8 秒最多提交一次。电脑的着法在浏览器里算，服务器无法证明它来自 AI，这点靠复盘、限频和管理员删人兜底。
+- 玩游戏与结算不需要登录；只有查看「排行」时才弹登录框。每局棋谱先保存在本机，游客刷新或断网后仍保留，登录后自动补传。同一邮箱在不同设备的成绩累加合并，以对局 UUID 去重；切换账号不会上传旧账号待传成绩。服务端同时保护查看榜单与上传接口。
+- 旧版只有本机汇总战绩，没有完整棋谱，保留原存档但不追溯折算排行榜积分；金币、宝石等宝箱存档仍保存在本机。
+- 首页「排行」页每 4 秒轮询一次（带 ETag，没变化时服务器回 304，节省响应体传输；函数与存储读取仍会发生，切到后台自动暂停）。Netlify Functions 不支持长连接，所以用轮询实现实时刷新；自己提交成绩后会立即刷新。
+- 存储是 Netlify Blobs：`gomoku-auth`（验证码、用户、会话）与 `gomoku-board`（玩家战绩、排行榜文档）；非生产部署自动改用 `-preview` 结尾的独立存储。排行榜文档用条件写入（ETag 乐观锁）更新，多人同时提交不会互相覆盖。
+- 接口在 `netlify/functions/api.mts`（路径 `/api/*`），逻辑在 `server/`。`npm run dev` 时 Vite 用同一份代码在内存里跑这些接口，登录框会直接显示验证码，方便本地调试。
+
+需要在 Netlify 配置的环境变量：
+
+| 变量 | 说明 |
+| --- | --- |
+| `AUTH_SECRET` | 必填，至少 16 位的随机串（如 `openssl rand -hex 32`），用于给验证码和会话做哈希；更换会让所有人重新登录 |
+| `RESEND_API_KEY` | 发验证码邮件用的 Resend 密钥；线上不配返回 503，验证码不会写入日志；仅本地开发显示调试验证码 |
+| `EMAIL_FROM` | 发件人，需是 Resend 已验证的域名，如 `五子棋 <login@你的域名>` |
+| `ADMIN_EMAILS` | 可选，逗号分隔；这些邮箱可调用 `DELETE /api/admin/players/<userId>` 把作弊的玩家移出排行榜 |
+
 ## 语音
 
 台词在 `src/app/voiceLines.ts`。改了台词或想换声音后重新生成（只会重做有变化的句子）：
@@ -73,7 +91,7 @@ FISH_API_KEY=... FISH_VOICE_ID=<声音 id> npm run voice -- --force   # 换声�
 
 ## 部署
 
-纯静态站点，无数据库、服务端环境变量或业务 API 密钥。
+游戏前端是静态资源；登录与排行榜使用 Netlify Functions、Blobs 和 Resend，所需环境变量见上文。
 
 - 正式域名：<https://gomoku.douni.one>
 - Netlify 地址：<https://pixi-gomoku.netlify.app>
@@ -85,8 +103,9 @@ FISH_API_KEY=... FISH_VOICE_ID=<声音 id> npm run voice -- --force   # 换声�
 
 GitHub Actions 的 `.github/workflows/ci.yml` 保留为手动备用发布流程 **Manual test and deploy**。
 2026-09-27 配置时，GitHub 托管运行器因账户付款/支出额度问题无法启动，因此不依赖它自动发布。
-账户恢复后可在 Actions 手动运行；该流程先测试构建，再把同一份 `dist/` 通过 Netlify 官方 ZIP API 发布，
-等待状态 `ready` 后逐个下载产物并核对 SHA-256（包含 AI Worker 与动态加载资源）。仅 `main` 会发布正式站点。
+账户恢复后可在 Actions 手动运行；该流程先测试构建，再触发 Netlify 对 `main` 的 Git 构建，
+同时部署 `dist/` 与 Functions。等待状态 `ready` 后检查提交 SHA、逐个下载静态产物核对 SHA-256
+（包含 AI Worker 与动态加载资源），并验证 `/api/auth/session`。仅 `main` 会发布正式站点。
 
 GitHub **Settings → Environments → production** 中需要：
 

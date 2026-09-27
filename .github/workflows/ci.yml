@@ -49,19 +49,17 @@ jobs:
         with:
           name: production-dist
           path: dist
-      - name: Publish tested build to Netlify
+      - name: Build and deploy static files and functions on Netlify
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
         run: |
           test -n "$NETLIFY_AUTH_TOKEN"
           test -n "$NETLIFY_SITE_ID"
-          (cd dist && zip -qr "$RUNNER_TEMP/site.zip" .)
           curl --fail-with-body --silent --show-error --max-time 120 \
+            -X POST \
             -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
-            -H 'Content-Type: application/zip' \
-            --data-binary "@$RUNNER_TEMP/site.zip" \
-            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys?title=$GITHUB_SHA" \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/builds?branch=main&title=$GITHUB_SHA" \
             > "$RUNNER_TEMP/netlify-deploy.json"
       - name: Verify published files
         env:

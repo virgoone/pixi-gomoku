@@ -1,6 +1,7 @@
 import { Application } from 'pixi.js';
 
 import { navigation } from './app/navigation';
+import { account } from './net/account';
 import { HomeScreen } from './screens/HomeScreen';
 import { LoadScreen } from './screens/LoadScreen';
 
@@ -24,6 +25,8 @@ async function boot() {
   const loader = new LoadScreen();
   await navigation.goTo(loader);
   await loader.load();
+  // Who is signed in (for the leaderboard); never blocks start-up.
+  void account.refresh();
 
   const params = new URLSearchParams(window.location.search);
   if (import.meta.env.DEV && params.has('demo')) {

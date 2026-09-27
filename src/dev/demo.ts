@@ -10,6 +10,7 @@ import { ResultScreen } from '../screens/ResultScreen';
  *   ?demo=result&brain=owl&moves=9     win screen (tier from brain and moves)
  *   ?demo=loss | ?demo=draw            badge screens
  *   ?demo=game&brain=fox               straight into a game
+ *   add &rated to the result demos to submit a real game to the leaderboard
  */
 export async function runDemo(params: URLSearchParams) {
   const demo = params.get('demo');
@@ -19,7 +20,11 @@ export async function runDemo(params: URLSearchParams) {
     return;
   }
   const moves = Number(params.get('moves') ?? 18);
-  const base: Outcome = { mode: 'ai', winner: BLACK, myStone: BLACK, totalMoves: moves * 2 - 1, winnerMoves: moves, reason: 'five', brain };
+  // A real, replayable game (black five on row 7) so the leaderboard accepts it.
+  const rated = params.has('rated')
+    ? { moves: [[3, 7], [3, 9], [4, 7], [4, 9], [5, 7], [5, 9], [6, 7], [6, 9], [7, 7]] as Array<[number, number]> }
+    : {};
+  const base: Outcome = { mode: 'ai', winner: BLACK, myStone: BLACK, totalMoves: moves * 2 - 1, winnerMoves: moves, reason: 'five', brain, ...rated };
   const outcome: Outcome = demo === 'loss' ? { ...base, winner: WHITE } : demo === 'draw' ? { ...base, winner: null, reason: 'draw', totalMoves: 225 } : base;
   await navigation.goTo(new ResultScreen(outcome, undefined, () => ({ mode: 'ai', brain, humanStone: BLACK })));
 }
