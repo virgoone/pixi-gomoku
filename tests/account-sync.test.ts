@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Outcome } from '../src/result/scoring';
 
+// Ranked-result tests isolate the independent personal-save synchronizer.
+vi.mock('../src/net/profileSync', () => ({ ProfileSync: class { setUser() {} } }));
+
 class LocalStorage {
   data = new Map<string, string>();
   get length() { return this.data.size; }

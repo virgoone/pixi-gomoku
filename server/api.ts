@@ -13,6 +13,7 @@ import {
 } from './auth';
 import { BoardError, getPlayer, readBoard, removePlayer, renamePlayer, submitGame } from './board';
 import type { KV } from './kv';
+import { syncProgress } from './profile';
 
 /**
  * All `/api/*` routes. Runs unchanged in the Netlify Function and in the Vite
@@ -102,6 +103,17 @@ export async function handleApi(request: Request, env: ApiEnv): Promise<Response
         await renamePlayer(env.board, renamed);
         return json(200, { user: publicUser(renamed), ...(await getPlayer(env.board, renamed)) });
       }
+    }
+
+    if (path === '/api/profile' && method === 'POST') {
+      const user = await currentUser();
+      if (!user) return fail(401, 'unauthorized', '登录后同步存档');
+      const raw = await request.text();
+      if (raw.length > 64_000) return fail(413, 'too_large', '存档批次过大');
+      let body: Record<string, unknown>;
+      try { body = JSON.parse(raw) as Record<string, unknown>; } catch { return fail(400, 'bad_profile', '存档格式不正确'); }
+      if (!body || body.userId !== user.id) return fail(409, 'account_changed', '登录账号已切换，请重新登录后同步');
+      return json(200, await syncProgress(env.board, user.id, body, env.now?.() ?? Date.now()));
     }
 
     if (path === '/api/results' && method === 'POST') {

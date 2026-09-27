@@ -3,7 +3,8 @@ import gsap from 'gsap';
 
 import { setMuted } from '../app/audio';
 import { navigation } from '../app/navigation';
-import { getProfile } from '../app/storage';
+import { getProfile, onProfileChange } from '../app/storage';
+import { account } from '../net/account';
 import { tex } from '../app/textures';
 import { BLACK } from '../gomoku/rules';
 import { AiSetupPopup } from '../popups/AiSetupPopup';
@@ -36,6 +37,7 @@ export class HomeScreen extends Container {
   private boardView = new LeaderboardView();
   private footer: Text;
   private time = 0;
+  private unsubscribers: Array<() => void> = [];
 
   constructor(private initialRoom?: string) {
     super();
@@ -70,6 +72,7 @@ export class HomeScreen extends Container {
     ];
     this.playView.addChild(...this.tiles);
     this.buildStats();
+    this.unsubscribers.push(onProfileChange(() => this.buildStats()), account.progress.onChange(() => this.buildStats()));
     this.statsView.visible = false;
     this.boardView.visible = false;
     this.footer = label('五子连珠，一起开局', 'small', { fontSize: 12, fill: 0x9a8bc8 });
@@ -78,6 +81,7 @@ export class HomeScreen extends Container {
   }
 
   private buildStats() {
+    for (const child of this.statsView.removeChildren()) { gsap.killTweensOf(child); child.destroy({ children: true }); }
     const p = getProfile();
     const games = p.wins + p.losses + p.draws;
     const entries: Array<[string, string, string]> = [
@@ -104,6 +108,17 @@ export class HomeScreen extends Container {
     const line = label(`共 ${games} 局 · 胜率 ${rate}% · 当前连胜 ${p.streak}`, 'heading', { fontSize: 20, fill: 0xffffff });
     line.y = 104;
     this.statsView.addChild(line);
+    const heading = label(account.user ? '账号战绩 · 包含历史存档' : '本机战绩', 'heading', { fontSize: 23, fill: 0xffe98a });
+    heading.y = -101;
+    const state = account.progress.state;
+    const status = label(!account.user ? '在排行榜登录后，合并本机存档' : state === 'syncing' ? '正在同步存档…' : state === 'error' ? '存档暂未同步 · 点击重试' : '存档已同步 · 点击刷新', 'body', { fontSize: 21, fill: state === 'error' ? 0xffd84a : 0xd9ccff });
+    status.y = 147;
+    status.eventMode = 'static';
+    status.cursor = 'pointer';
+    status.on('pointertap', () => { if (account.user) void account.progress.sync(); });
+    const note = label('历史存档保留胜负与奖励，不补计排行榜积分', 'small', { fontSize: 17 });
+    note.y = 182;
+    this.statsView.addChild(heading, status, note);
   }
 
   private showTab(id: string) {
@@ -186,7 +201,7 @@ export class HomeScreen extends Container {
       });
       this.playView.position.set(width / 2, (areaTop + areaBottom) / 2);
     }
-    const statsScale = Math.min(1, (width - 24) / 560, (areaBottom - areaTop) / 260);
+    const statsScale = Math.min(1, (width - 24) / 560, (areaBottom - areaTop) / 340);
     this.statsView.scale.set(statsScale);
     this.statsView.position.set(width / 2, (areaTop + areaBottom) / 2 - 20 * statsScale);
     this.footer.position.set(width / 2, height - 18);
@@ -217,6 +232,11 @@ export class HomeScreen extends Container {
 
   onLeave() {
     this.boardView.deactivate();
+  }
+
+  override destroy(options?: Parameters<Container['destroy']>[0]) {
+    for (const unsubscribe of this.unsubscribers) unsubscribe();
+    super.destroy(options);
   }
 
   update(ticker: Ticker) {

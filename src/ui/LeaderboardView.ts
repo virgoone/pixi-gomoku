@@ -36,6 +36,7 @@ export class LeaderboardView extends Container {
   private h = 420;
   private time = 0;
   private unsubscribe: () => void;
+  private unsubscribeProgress: () => void;
   private lastPoints = new Map<string, number>();
   private meRank: { rank: number | null; points: number; played: boolean } | null = null;
   private active = false;
@@ -85,6 +86,7 @@ export class LeaderboardView extends Container {
       void this.loadMe();
       this.render();
     });
+    this.unsubscribeProgress = account.progress.onChange(() => this.renderFooter());
   }
 
   /** Start live updates (the tab became visible). */
@@ -161,7 +163,7 @@ export class LeaderboardView extends Container {
     return Math.max(3, Math.min(10, Math.floor((this.h - HEADER_H - this.footerHeight) / ROW_H)));
   }
 
-  private get footerHeight() { return this.w < 440 && account.user ? 110 : FOOTER_H; }
+  private get footerHeight() { return this.w < 440 && account.user ? 138 : FOOTER_H; }
 
   private render(changed: Set<string> | null = null) {
     if (this.destroyed) return;
@@ -273,11 +275,18 @@ export class LeaderboardView extends Container {
     out.position.set(this.w / 2 - 24 - 42, 0);
     if (compact) {
       summary.anchor.set(0.5);
-      summary.position.set(0, -28);
-      rename.position.set(-49, 20);
-      out.position.set(49, 20);
+      summary.position.set(0, -43);
+      rename.position.set(-49, 35);
+      out.position.set(49, 35);
     }
-    this.footer.addChild(summary, rename, out);
+    const state = account.progress.state;
+    const sync = label(state === 'syncing' ? '正在同步本机存档…' : state === 'error' ? '存档同步失败 · 点击重试' : '存档已同步 · 历史战绩在「战绩」页', 'small', { fontSize: 12, fill: state === 'error' ? 0xffd84a : 0xc9bde8 });
+    sync.y = compact ? -14 : 31;
+    if (sync.width > this.w - 48) sync.scale.set((this.w - 48) / sync.width);
+    sync.eventMode = 'static';
+    sync.cursor = 'pointer';
+    sync.on('pointertap', () => void account.progress.sync());
+    this.footer.addChild(summary, sync, rename, out);
   }
 
   update(ticker: Ticker) {
@@ -290,6 +299,7 @@ export class LeaderboardView extends Container {
   override destroy(options?: Parameters<Container['destroy']>[0]) {
     this.feed.stop();
     this.unsubscribe();
+    this.unsubscribeProgress();
     super.destroy(options);
   }
 }
