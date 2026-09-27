@@ -1,4 +1,10 @@
-/** 15×15 free-style gomoku: black moves first, five or more in a row wins. */
+import { type Forbidden, forbiddenAt } from './renju';
+
+/**
+ * 15×15 gomoku: black moves first, five or more in a row wins. Under the
+ * optional renju rule black must make exactly five and may not play forbidden
+ * points (see renju.ts); white is unrestricted.
+ */
 
 export const BOARD_SIZE = 15;
 export const EMPTY = 0;
@@ -9,6 +15,7 @@ export type Stone = typeof BLACK | typeof WHITE;
 export type Cell = typeof EMPTY | Stone;
 export type Point = { x: number; y: number };
 export type Board = Uint8Array;
+export type Rule = 'freestyle' | 'renju';
 
 export const DIRECTIONS: ReadonlyArray<readonly [number, number]> = [
   [1, 0],
@@ -65,7 +72,9 @@ export function stoneCount(board: Board) {
  * The winning line through (x, y) for `stone`, or null. Returns every stone in
  * the run (five or more), ordered from one end to the other.
  */
-export function winningLine(board: Board, x: number, y: number, stone: Stone): Point[] | null {
+export function winningLine(board: Board, x: number, y: number, stone: Stone, rule: Rule = 'freestyle'): Point[] | null {
+  // Renju: only an exact five wins for black (an overline is forbidden).
+  const exact = rule === 'renju' && stone === BLACK;
   const size = sizeOf(board);
   for (const [dx, dy] of DIRECTIONS) {
     const line: Point[] = [{ x, y }];
@@ -81,13 +90,14 @@ export function winningLine(board: Board, x: number, y: number, stone: Stone): P
       if (!inBounds(size, nx, ny) || board[ny * size + nx] !== stone) break;
       line.unshift({ x: nx, y: ny });
     }
-    if (line.length >= 5) return line;
+    if (exact ? line.length === 5 : line.length >= 5) return line;
   }
   return null;
 }
 
 export type MoveResult =
   | { kind: 'invalid' }
+  | { kind: 'forbidden'; reason: Forbidden }
   | { kind: 'placed' }
   | { kind: 'win'; line: Point[] }
   | { kind: 'draw' };
@@ -95,6 +105,7 @@ export type MoveResult =
 /** Game state with history; the single source of truth for every mode. */
 export class GomokuGame {
   readonly size: number;
+  readonly rule: Rule;
   board: Board;
   turn: Stone = BLACK;
   history: Array<Point & { stone: Stone }> = [];
@@ -102,8 +113,9 @@ export class GomokuGame {
   winLine: Point[] | null = null;
   over = false;
 
-  constructor(size = BOARD_SIZE) {
+  constructor(size = BOARD_SIZE, rule: Rule = 'freestyle') {
     this.size = size;
+    this.rule = rule;
     this.board = createBoard(size);
   }
 
@@ -118,9 +130,11 @@ export class GomokuGame {
   play(x: number, y: number): MoveResult {
     if (this.over || !isEmpty(this.board, x, y)) return { kind: 'invalid' };
     const stone = this.turn;
+    const reason = this.forbidden(x, y);
+    if (reason) return { kind: 'forbidden', reason };
     set(this.board, x, y, stone);
     this.history.push({ x, y, stone });
-    const line = winningLine(this.board, x, y, stone);
+    const line = winningLine(this.board, x, y, stone, this.rule);
     if (line) {
       this.over = true;
       this.winner = stone;
@@ -133,6 +147,12 @@ export class GomokuGame {
     }
     this.turn = opponent(stone);
     return { kind: 'placed' };
+  }
+
+  /** Why the side to move may not play at (x, y) under this game's rule, or null. */
+  forbidden(x: number, y: number): Forbidden | null {
+    if (this.rule !== 'renju' || this.turn !== BLACK) return null;
+    return forbiddenAt(this.board, x, y);
   }
 
   /** Remove the last `count` moves. Returns the removed moves, newest first. */

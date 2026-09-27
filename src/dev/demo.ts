@@ -1,6 +1,6 @@
 import { navigation } from '../app/navigation';
 import type { BrainId } from '../gomoku/ai';
-import { BLACK, WHITE } from '../gomoku/rules';
+import { BLACK, type Rule, WHITE } from '../gomoku/rules';
 import type { Outcome } from '../result/scoring';
 import { GameScreen } from '../screens/GameScreen';
 import { ResultScreen } from '../screens/ResultScreen';
@@ -10,13 +10,19 @@ import { ResultScreen } from '../screens/ResultScreen';
  *   ?demo=result&brain=owl&moves=9     win screen (tier from brain and moves)
  *   ?demo=loss | ?demo=draw            badge screens
  *   ?demo=game&brain=fox               straight into a game
+ *     &rule=renju                      … under renju rules
+ *     &setup=5,7;0,0;6,7                … with these moves played first (black first)
  *   add &rated to the result demos to submit a real game to the leaderboard
  */
 export async function runDemo(params: URLSearchParams) {
   const demo = params.get('demo');
   const brain = (params.get('brain') ?? 'fox') as BrainId;
   if (demo === 'game') {
-    await navigation.goTo(new GameScreen({ mode: 'ai', brain, humanStone: BLACK }));
+    const rule = (params.get('rule') ?? 'freestyle') as Rule;
+    const screen = new GameScreen({ mode: 'ai', brain, humanStone: BLACK, rule });
+    const setup = (params.get('setup') ?? '').split(';').filter(Boolean).map((move) => move.split(',').map(Number) as [number, number]);
+    screen.preload(setup);
+    await navigation.goTo(screen);
     return;
   }
   const moves = Number(params.get('moves') ?? 18);
