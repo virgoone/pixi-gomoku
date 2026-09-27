@@ -1,4 +1,5 @@
 import type { BrainId } from '../gomoku/ai';
+import type { Opening } from '../gomoku/opening';
 import type { Rule } from '../gomoku/rules';
 import { LocalProgress, PROGRESS_PREFIX } from '../profile/localProgress';
 import { COUNTERS, type ProgressReceipt } from '../profile/progress';
@@ -18,6 +19,8 @@ export type Profile = {
   playFirst: boolean;
   /** Rule last picked; shared by AI games, pass-and-play and hosted rooms. */
   rule: Rule;
+  /** Opening rule last picked (only used with renju). */
+  opening: Opening;
   nickname: string;
 };
 
@@ -34,6 +37,7 @@ const defaults = (): Profile => ({
   lastBrain: 'fox',
   playFirst: true,
   rule: 'freestyle',
+  opening: 'free',
   nickname: `棋手${Math.floor(100 + Math.random() * 900)}`,
 });
 

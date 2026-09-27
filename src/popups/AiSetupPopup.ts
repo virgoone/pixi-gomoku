@@ -6,7 +6,7 @@ import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
 import { BRAINS, type BrainId, type EngineState, masterEngine } from '../gomoku/ai';
-import { RULE_NAMES } from '../gomoku/renju';
+import { nextVariant, normalizeVariant, type Opening, type Variant, variantName } from '../gomoku/opening';
 import { BLACK, type Rule, WHITE } from '../gomoku/rules';
 import { Button } from '../ui/Button';
 import { label } from '../ui/Label';
@@ -20,19 +20,19 @@ import { BasePopup } from './BasePopup';
 export class AiSetupPopup extends BasePopup {
   private brain: BrainId;
   private playFirst: boolean;
-  private rule: Rule;
+  private variant: Variant;
   private cards = new Map<BrainId, { bg: NineSliceSprite; root: Container }>();
   private firstButton: Button;
   private ruleButton: Button;
   private startButton: Button;
   private unsubscribe: () => void;
 
-  constructor(private onStart: (brain: BrainId, humanStone: 1 | 2, rule: Rule) => void) {
+  constructor(private onStart: (brain: BrainId, humanStone: 1 | 2, rule: Rule, opening: Opening) => void) {
     super('选择对手', 720, 640);
     const profile = getProfile();
     this.brain = profile.lastBrain;
     this.playFirst = profile.playFirst;
-    this.rule = profile.rule;
+    this.variant = normalizeVariant(profile.rule, profile.opening);
 
     const cardWidth = 156;
     const cardHeight = 300;
@@ -72,7 +72,7 @@ export class AiSetupPopup extends BasePopup {
 
     this.firstButton = new Button({ text: this.firstText(), skin: 'white', width: 280, height: 66, fontSize: 22, onPress: () => this.toggleFirst() });
     this.firstButton.position.set(-148, 150);
-    this.ruleButton = new Button({ text: this.ruleText(), skin: 'white', width: 280, height: 66, fontSize: 22, onPress: () => this.toggleRule() });
+    this.ruleButton = new Button({ text: this.ruleText(), skin: 'white', width: 280, height: 66, fontSize: 20, onPress: () => this.toggleRule() });
     this.ruleButton.position.set(148, 150);
     const start = new Button({
       text: '开始对局',
@@ -86,11 +86,11 @@ export class AiSetupPopup extends BasePopup {
           void masterEngine.load().catch(() => undefined);
           return;
         }
-        updateProfile({ lastBrain: this.brain, playFirst: this.playFirst, rule: this.rule });
+        const { rule, opening } = this.variant;
+        updateProfile({ lastBrain: this.brain, playFirst: this.playFirst, rule, opening });
         const brain = this.brain;
         const stone = this.playFirst ? BLACK : WHITE;
-        const rule = this.rule;
-        void navigation.dismissPopup().then(() => this.onStart(brain, stone, rule));
+        void navigation.dismissPopup().then(() => this.onStart(brain, stone, rule, opening));
       },
     });
     start.y = 238;
@@ -127,6 +127,8 @@ export class AiSetupPopup extends BasePopup {
   }
 
   private firstText() {
+    // Under the RIF opening the colours can still swap: "first" means placing the opening.
+    if (this.variant.opening === 'rif') return this.playFirst ? '我先摆开局' : '对手先摆开局';
     return this.playFirst ? '我执黑 · 先手' : '我执白 · 后手';
   }
 
@@ -136,12 +138,15 @@ export class AiSetupPopup extends BasePopup {
   }
 
   private ruleText() {
-    return this.rule === 'renju' ? `${RULE_NAMES.renju} · 黑棋有禁手` : `${RULE_NAMES.freestyle} · 自由五子`;
+    const { rule, opening } = this.variant;
+    if (rule === 'freestyle') return '无禁手 · 自由五子';
+    return opening === 'rif' ? variantName(this.variant) : '连珠 · 黑棋有禁手';
   }
 
   private toggleRule() {
-    this.rule = this.rule === 'renju' ? 'freestyle' : 'renju';
+    this.variant = nextVariant(this.variant);
     this.ruleButton.setText(this.ruleText());
+    this.firstButton.setText(this.firstText());
   }
 
   private select(id: BrainId) {

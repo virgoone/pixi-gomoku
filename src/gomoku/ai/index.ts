@@ -1,7 +1,7 @@
 import { forbiddenAt } from '../renju';
-import { BLACK, type Board, EMPTY, type Point, type Rule, type Stone } from '../rules';
+import { BLACK, type Board, EMPTY, type Point, type Rule, type Stone, WHITE } from '../rules';
 import type { AiRequest, AiResponse } from './ai.worker';
-import { type BrainId, chooseMove } from './brains';
+import { type BrainId, chooseMove, heuristicChoose, heuristicOffers, heuristicSwap } from './brains';
 import { masterEngine } from './master';
 
 export { BRAINS, type BrainId, type BrainInfo, brainInfo } from './brains';
@@ -54,6 +54,71 @@ export class AiPlayer {
     const elapsed = performance.now() - started;
     if (elapsed < minDelay) await new Promise((resolve) => setTimeout(resolve, minDelay - elapsed));
     return move;
+  }
+
+  // ---- RIF opening ----------------------------------------------------------------
+
+  private get usesEngine() {
+    return this.brain === 'master' && !this.engineFailed;
+  }
+
+  /** Run an engine query; on failure switch to the owl for good and return null. */
+  private async engine<T>(query: () => Promise<T>): Promise<T | null> {
+    try {
+      return await query();
+    } catch {
+      this.engineFailed = true;
+      return null;
+    }
+  }
+
+  private static async atLeast<T>(started: number, minDelay: number, value: T) {
+    const elapsed = performance.now() - started;
+    if (elapsed < minDelay) await new Promise((resolve) => setTimeout(resolve, minDelay - elapsed));
+    return value;
+  }
+
+  /** As the tentative white after three stones: true to swap and take black. */
+  async decideSwap(board: Board, minDelay = 700): Promise<boolean> {
+    const started = performance.now();
+    if (this.usesEngine) {
+      // White is to move; a negative score means white is worse off, so take black.
+      const reply = await this.engine(() => masterEngine.think(board, WHITE, this.rule, 600));
+      if (reply && reply.score !== null) return AiPlayer.atLeast(started, minDelay, reply.score < 0);
+    }
+    return AiPlayer.atLeast(started, minDelay, heuristicSwap(board));
+  }
+
+  /** As black on move 5: two candidate moves that are not symmetric to each other. */
+  async offerFifth(board: Board, minDelay = 700): Promise<Point[]> {
+    const started = performance.now();
+    let first: Point | undefined;
+    if (this.usesEngine) first = (await this.engineMove(board, BLACK)) ?? undefined;
+    return AiPlayer.atLeast(started, minDelay, heuristicOffers(board, this.rule, first));
+  }
+
+  /** As white: keep the offered 5th move that is best for white. */
+  async chooseFifth(board: Board, offers: Point[], minDelay = 700): Promise<Point> {
+    const started = performance.now();
+    if (this.usesEngine) {
+      let best: Point | null = null;
+      let bestScore = -Infinity;
+      for (const offer of offers) {
+        const work = new Uint8Array(board);
+        work[offer.y * Math.round(Math.sqrt(board.length)) + offer.x] = BLACK;
+        const reply = await this.engine(() => masterEngine.think(work, WHITE, this.rule, 500));
+        if (!reply || reply.score === null) {
+          best = null;
+          break;
+        }
+        if (reply.score > bestScore) {
+          bestScore = reply.score;
+          best = offer;
+        }
+      }
+      if (best) return AiPlayer.atLeast(started, minDelay, best);
+    }
+    return AiPlayer.atLeast(started, minDelay, heuristicChoose(board, offers));
   }
 
   /** The engine's move, or null (and the owl from now on) if it failed or played an illegal point. */

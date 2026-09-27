@@ -140,19 +140,19 @@ export class HomeScreen extends Container {
   }
 
   private openAi() {
-    void navigation.present(new AiSetupPopup((brain, humanStone, rule) => void navigation.goTo(new GameScreen({ mode: 'ai', brain, humanStone, rule }))));
+    void navigation.present(new AiSetupPopup((brain, humanStone, rule, opening) => void navigation.goTo(new GameScreen({ mode: 'ai', brain, humanStone, rule, opening }))));
   }
 
   private openLocal() {
-    void navigation.present(new LocalSetupPopup((rule) => void navigation.goTo(new GameScreen({ mode: 'local', rule }))));
+    void navigation.present(new LocalSetupPopup(({ rule, opening }) => void navigation.goTo(new GameScreen({ mode: 'local', rule, opening }))));
   }
 
   private openOnline(code?: string) {
     void navigation.present(
       new OnlinePopup(
         {
-          onStart: (link, myStone, rule, notice) => void navigation.goTo(new GameScreen({ mode: 'online', link, myStone, round: 1, rule, notice })),
-          onFallback: (rule) => void navigation.goTo(new GameScreen({ mode: 'ai', brain: 'fox', humanStone: BLACK, rule })),
+          onStart: (link, myStone, { rule, opening }, notice) => void navigation.goTo(new GameScreen({ mode: 'online', link, myStone, round: 1, rule, opening, notice })),
+          onFallback: ({ rule, opening }) => void navigation.goTo(new GameScreen({ mode: 'ai', brain: 'fox', humanStone: BLACK, rule, opening })),
         },
         code,
       ),

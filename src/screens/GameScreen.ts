@@ -9,6 +9,7 @@ import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
 import { AiPlayer, type BrainId, brainInfo } from '../gomoku/ai';
+import { equivalentOffers, freshOpening, inOpeningZone, normalizeVariant, type Opening, openingPhase, type OpeningPhase, openingRadius, randomOpeningMove } from '../gomoku/opening';
 import { FORBIDDEN_NAMES, forbiddenPoints, RULE_NAMES } from '../gomoku/renju';
 import { BLACK, BOARD_SIZE, GomokuGame, opponent, type Point, type Rule, type Stone, WHITE } from '../gomoku/rules';
 import type { NetMessage, OnlineLink } from '../net/online';
@@ -27,10 +28,10 @@ import { HomeScreen } from './HomeScreen';
 import { ResultScreen } from './ResultScreen';
 
 export type GameConfig =
-  | { mode: 'ai'; brain: BrainId; humanStone: Stone; rule?: Rule }
-  | { mode: 'local'; rule?: Rule }
+  | { mode: 'ai'; brain: BrainId; humanStone: Stone; rule?: Rule; opening?: Opening }
+  | { mode: 'local'; rule?: Rule; opening?: Opening }
   /** `notice` is shown once at the start (e.g. the room fell back to free-style). */
-  | { mode: 'online'; link: OnlineLink; myStone: Stone; round: number; rule?: Rule; notice?: string };
+  | { mode: 'online'; link: OnlineLink; myStone: Stone; round: number; rule?: Rule; opening?: Opening; notice?: string };
 
 type Seat = 'human' | 'ai' | 'remote';
 
@@ -59,10 +60,24 @@ export class GameScreen extends Container {
   private opponentGone = false;
   private w = 0;
   private h = 0;
+  /** Widest the status line may be; longer texts shrink to fit. */
+  private statusMaxWidth = 280;
+  /** RIF opening (renju only) and its decisions so far. */
+  private readonly opening: Opening;
+  private openingState = freshOpening();
+  /** 5th-move candidates the local player has tapped but not yet offered. */
+  private picking: Point[] = [];
+  /** The seats as the game started, before any opening swap: what "play again" reuses. */
+  private startConfig: GameConfig;
 
   constructor(private config: GameConfig) {
     super();
-    this.game = new GomokuGame(BOARD_SIZE, config.rule ?? 'freestyle');
+    this.startConfig = config;
+    // Dev only: lets browser tests read the game state and act as the player.
+    if (import.meta.env.DEV) (window as unknown as { __gomokuScreen?: GameScreen }).__gomokuScreen = this;
+    const variant = normalizeVariant(config.rule ?? 'freestyle', config.opening);
+    this.game = new GomokuGame(BOARD_SIZE, variant.rule);
+    this.opening = variant.opening;
     this.status = label('', 'heading', { fontSize: 24 });
     this.menu = new IconButton({ icon: 'menu', size: 56, onPress: () => this.openMenu() });
     this.undoButton = new Button({ text: '悔棋', skin: 'white', width: 170, height: 70, icon: 'undo', fontSize: 24, onPress: () => this.undo() });
@@ -141,6 +156,7 @@ export class GameScreen extends Container {
     await gsap.from(this.board.scale, { x: 0.85, y: 0.85, duration: 0.4, ease: 'back.out(1.8)' });
     const notice = this.config.mode === 'online' ? this.config.notice : undefined;
     if (notice) toast(this, notice, this.w);
+    else if (this.opening === 'rif') toast(this, '三手交换 · 五手两打：先摆三手，对方可交换', this.w);
     else if (this.game.rule === 'renju') toast(this, '连珠规则：黑棋不能下三三、四四、长连', this.w);
     this.nextTurn();
   }
@@ -158,33 +174,202 @@ export class GameScreen extends Container {
     }
   }
 
+  private phase(): OpeningPhase {
+    return openingPhase(this.opening, this.game.history.length, this.openingState);
+  }
+
+  /** Whose decision it is: black places the opening and offers the 5th move, white swaps and chooses. */
+  private actorStone(phase = this.phase()): Stone {
+    if (phase === 'place' || phase === 'offer') return BLACK;
+    if (phase === 'swap' || phase === 'choose') return WHITE;
+    return this.game.turn;
+  }
+
   private nextTurn() {
     if (this.ended) return;
     this.board.hideGhost();
-    const turn = this.game.turn;
-    const seat = this.seatOf(turn);
-    this.board.turnStone = turn;
-    this.board.acceptingInput = seat === 'human';
-    this.board.setForbidden(seat === 'human' && this.game.rule === 'renju' && turn === BLACK ? forbiddenPoints(this.game.board) : []);
-    for (const [stone, card] of this.cards) card.setActive(stone === turn, stone === turn && seat === 'ai');
-    for (const [stone, card] of this.cards) if (!(stone === turn && seat === 'ai')) card.setStatus(this.describe(stone).subtitle);
+    const phase = this.phase();
+    const actor = this.actorStone(phase);
+    const seat = this.seatOf(actor);
+    const mine = seat === 'human';
+    this.board.turnStone = this.game.turn;
+    this.board.acceptingInput = mine && phase !== 'swap';
+    this.board.ghostEnabled = phase !== 'choose';
+    this.board.setForbidden(mine && this.game.rule === 'renju' && this.game.turn === BLACK && (phase === 'play' || phase === 'offer') ? forbiddenPoints(this.game.board) : []);
+    this.board.setZone(mine && phase === 'place' ? openingRadius(this.game.history.length) : null);
+    this.board.setOffers(phase === 'choose' ? this.openingState.offers : phase === 'offer' ? this.picking : []);
+    for (const [stone, card] of this.cards) card.setActive(stone === actor, stone === actor && seat === 'ai');
+    for (const [stone, card] of this.cards) if (!(stone === actor && seat === 'ai')) card.setStatus(this.describe(stone).subtitle);
 
     this.updateStatus();
     gsap.fromTo(this.status, { alpha: 0.3 }, { alpha: 1, duration: 0.3 });
     this.undoButton.setEnabled(this.canUndo());
     this.resignButton.setEnabled(!this.ended && (this.config.mode === 'local' || this.game.history.length > 0));
-    if (seat === 'ai') void this.aiTurn();
+    if (seat === 'ai') void (phase === 'play' ? this.aiTurn() : this.aiOpening(phase));
+    else if (mine && phase === 'swap') this.askSwap();
   }
 
   private updateStatus() {
     if (this.ended) return;
-    const turn = this.game.turn;
-    const seat = this.seatOf(turn);
+    const phase = this.phase();
+    const actor = this.actorStone(phase);
+    const seat = this.seatOf(actor);
+    const name = this.describe(actor).name;
+    // Same-device play names the side, since both players read the same screen.
+    const you = this.config.mode === 'local' ? `${name}：` : '';
     if (seat === 'human' && this.board.hasTouchPreview) this.status.text = '再点一次落子';
-    else if (this.config.mode === 'local') this.status.text = `轮到${stoneName(turn)}`;
-    else if (seat === 'human') this.status.text = `轮到你了 · ${stoneName(turn)}`;
-    else if (seat === 'ai') this.status.text = `${this.describe(turn).name}正在思考`;
-    else this.status.text = `等待${this.describe(turn).name}落子`;
+    else if (phase === 'place') {
+      const step = `摆第 ${this.game.history.length + 1} 手（${stoneName(this.game.turn)}）`;
+      this.status.text = seat === 'human' ? `${you}开局 · ${step}` : seat === 'ai' ? `${name}正在摆开局` : `等待${name}摆开局`;
+    } else if (phase === 'swap') {
+      this.status.text = seat === 'human' ? `${you}三手交换：要不要换？` : seat === 'ai' ? `${name}在考虑是否交换` : `等待${name}决定是否交换`;
+    } else if (phase === 'offer') {
+      this.status.text = seat === 'human' ? `${you}五手两打：选两个点（${this.picking.length}/2）` : seat === 'ai' ? `${name}在选第五手` : `等待${name}给出两个第五手`;
+    } else if (phase === 'choose') {
+      this.status.text = seat === 'human' ? `${you}留下一个第五手` : seat === 'ai' ? `${name}在挑第五手` : `等待${name}挑第五手`;
+    } else if (this.config.mode === 'local') this.status.text = `轮到${stoneName(actor)}`;
+    else if (seat === 'human') this.status.text = `轮到你了 · ${stoneName(actor)}`;
+    else if (seat === 'ai') this.status.text = `${name}正在思考`;
+    else this.status.text = `等待${name}落子`;
+    this.fitStatus();
+  }
+
+  /** Shrink the status line to its space; texts change after layout (e.g. the opening prompts). */
+  private fitStatus() {
+    const natural = this.status.width / this.status.scale.x;
+    this.status.scale.set(Math.min(1, this.statusMaxWidth / Math.max(1, natural)));
+  }
+
+  // ---- RIF opening ----------------------------------------------------------------------
+
+  /** The AI's part of the opening: place, swap, offer or choose. */
+  private async aiOpening(phase: OpeningPhase) {
+    if (!this.ai) return;
+    const token = ++this.token;
+    this.aiThinking = true;
+    this.undoButton.setEnabled(false);
+    const ai = this.ai;
+    const before = ai.effectiveBrain;
+    const board = new Uint8Array(this.game.board);
+    const stale = () => token !== this.token || this.destroyed || this.ended;
+    if (phase === 'place') {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+      if (stale()) return;
+      this.aiThinking = false;
+      this.apply(randomOpeningMove(board, this.game.history.length));
+      return;
+    }
+    if (phase === 'swap') {
+      const swap = await ai.decideSwap(board);
+      if (stale()) return;
+      this.aiThinking = false;
+      this.decideSwap(swap, false);
+    } else if (phase === 'offer') {
+      const offers = await ai.offerFifth(board);
+      if (stale()) return;
+      this.aiThinking = false;
+      // Two offers are always found in practice; with one there is nothing to choose.
+      if (offers.length === 2) this.submitOffers(offers, false);
+      else if (offers[0]) this.apply(offers[0]);
+    } else if (phase === 'choose') {
+      const keep = await ai.chooseFifth(board, this.openingState.offers);
+      if (stale()) return;
+      this.aiThinking = false;
+      this.keepOffer(keep, false);
+    }
+    if (ai.effectiveBrain !== before) toast(this, `大师引擎出错，由${brainInfo(ai.effectiveBrain).name}接手，本局按它结算`, this.w);
+  }
+
+  private askSwap() {
+    const local = this.config.mode === 'local';
+    void navigation.present(
+      new ConfirmPopup({
+        title: '三手交换',
+        message: local ? '白方：要和黑方交换执子吗？\n交换后你执黑，对方执白下第四手。' : '要和对手交换执子吗？\n交换后你执黑，对手执白下第四手。',
+        confirm: '交换',
+        cancel: '不交换',
+        onConfirm: () => this.decideSwap(true, true),
+        onCancel: () => this.decideSwap(false, true),
+      }),
+    );
+  }
+
+  /** Apply the tentative white's decision; `mine` when the local player made it. */
+  private decideSwap(swap: boolean, mine: boolean) {
+    if (this.ended || this.phase() !== 'swap') return;
+    this.openingState.swapDecided = true;
+    const config = this.config;
+    if (mine && config.mode === 'online') config.link.send({ type: 'swap', swap });
+    if (swap) {
+      if (config.mode === 'ai') this.config = { ...config, humanStone: opponent(config.humanStone) };
+      else if (config.mode === 'online') this.config = { ...config, myStone: opponent(config.myStone) };
+      this.setupPlayers();
+    }
+    const me = this.config.mode === 'ai' ? this.config.humanStone : this.config.mode === 'online' ? this.config.myStone : null;
+    if (!swap) toast(this, '不交换，白方下第四手', this.w);
+    else if (me === null) toast(this, '交换执子：两位请换个位置', this.w);
+    else toast(this, `交换执子：你现在执${stoneName(me)}`, this.w);
+    this.nextTurn();
+  }
+
+  /** Local black taps candidate 5th moves; tapping one again takes it back. */
+  private pickOffer(point: Point) {
+    const at = this.picking.findIndex((p) => p.x === point.x && p.y === point.y);
+    if (at >= 0) {
+      this.picking.splice(at, 1);
+      this.nextTurn();
+      return;
+    }
+    const reason = this.game.forbidden(point.x, point.y);
+    if (reason) {
+      sfx.invalid();
+      toast(this, `禁手：${FORBIDDEN_NAMES[reason]}，黑棋不能下这里`, this.w);
+      return;
+    }
+    if (this.picking[0] && equivalentOffers(this.game.board, this.picking[0], point)) {
+      sfx.invalid();
+      toast(this, '这两个点对称，算同一种，请换一个', this.w);
+      return;
+    }
+    sfx.stone();
+    this.picking.push(point);
+    if (this.picking.length < 2) {
+      this.nextTurn();
+      return;
+    }
+    const offers = this.picking;
+    this.picking = [];
+    this.submitOffers(offers, true);
+  }
+
+  private submitOffers(offers: Point[], mine: boolean) {
+    if (this.ended || this.phase() !== 'offer') return;
+    const config = this.config;
+    if (mine && config.mode === 'online') config.link.send({ type: 'offer', points: offers.map((p) => [p.x, p.y] as [number, number]) });
+    this.openingState.offers = offers.map((p) => ({ x: p.x, y: p.y }));
+    this.nextTurn();
+  }
+
+  /** White keeps one offer: it becomes the 5th move and the other is dropped. */
+  private keepOffer(point: Point, mine: boolean) {
+    if (this.ended || this.phase() !== 'choose') return;
+    if (!this.openingState.offers.some((p) => p.x === point.x && p.y === point.y)) {
+      if (mine) toast(this, '点一个标出来的第五手', this.w);
+      return;
+    }
+    const config = this.config;
+    if (mine && config.mode === 'online') config.link.send({ type: 'choose', x: point.x, y: point.y });
+    this.openingState.offers = [];
+    this.board.setOffers([]);
+    this.apply(point);
+  }
+
+  /** Checks for an opening move from another peer. */
+  private validOffers(points: Point[]) {
+    const [a, b] = points;
+    const board = this.game.board;
+    const free = (p: Point) => board[p.y * BOARD_SIZE + p.x] === 0 && this.game.forbidden(p.x, p.y) === null;
+    return free(a) && free(b) && !equivalentOffers(board, a, b);
   }
 
   private async aiTurn() {
@@ -202,7 +387,11 @@ export class GameScreen extends Container {
   }
 
   private onLocalMove(point: Point) {
-    if (this.ended || this.seatOf(this.game.turn) !== 'human') return;
+    const phase = this.phase();
+    if (this.ended || this.seatOf(this.actorStone(phase)) !== 'human') return;
+    if (phase === 'offer') return this.pickOffer(point);
+    if (phase === 'choose') return this.keepOffer(point, true);
+    if (phase === 'swap') return;
     const index = this.game.history.length;
     if (this.apply(point) && this.config.mode === 'online') this.config.link.send({ type: 'move', x: point.x, y: point.y, index });
   }
@@ -210,6 +399,12 @@ export class GameScreen extends Container {
   /** Play a move on the model and the view. Returns false if it was rejected. */
   private apply(point: Point) {
     const stone = this.game.turn;
+    if (this.phase() === 'place' && !inOpeningZone(this.game.board, this.game.history.length, point)) {
+      sfx.invalid();
+      const where = this.game.history.length === 0 ? '第 1 手下在天元' : this.game.history.length === 1 ? '第 2 手下在天元周围一圈' : '第 3 手下在天元周围两圈内';
+      toast(this, `开局规则：${where}`, this.w);
+      return false;
+    }
     const result = this.game.play(point.x, point.y);
     if (result.kind === 'invalid') {
       sfx.invalid();
@@ -230,19 +425,22 @@ export class GameScreen extends Container {
 
   private canUndo() {
     if (this.config.mode === 'online' || this.ended || this.aiThinking) return false;
+    // The RIF opening cannot be taken back: only moves after the kept 5th move can.
+    if (this.opening === 'rif' && (this.phase() !== 'play' || this.game.history.length - this.undoCount() < 5)) return false;
     if (this.config.mode === 'ai') return this.game.movesBy(this.config.humanStone) > 0;
     return this.game.history.length > 0;
+  }
+
+  /** Moves one undo takes back: against the AI, its reply goes together with our own move. */
+  private undoCount() {
+    if (this.config.mode !== 'ai') return 1;
+    return this.game.lastMove?.stone === this.config.humanStone ? 1 : 2;
   }
 
   private undo() {
     if (!this.canUndo()) return;
     this.token += 1;
-    let count = 1;
-    if (this.config.mode === 'ai') {
-      // Take back the AI reply together with our own move.
-      count = this.game.lastMove?.stone === this.config.humanStone ? 1 : 2;
-    }
-    for (const move of this.game.undo(count)) this.board.removeStone(move.x, move.y);
+    for (const move of this.game.undo(this.undoCount())) this.board.removeStone(move.x, move.y);
     const last = this.game.lastMove;
     this.board.setLastMove(last ? { x: last.x, y: last.y } : null);
     this.nextTurn();
@@ -261,7 +459,8 @@ export class GameScreen extends Container {
         danger: true,
         onConfirm: () => {
           if (this.ended) return;
-          const loser = config.mode === 'local' ? this.game.turn : config.mode === 'ai' ? config.humanStone : config.myStone;
+          const current = this.config;
+          const loser = current.mode === 'local' ? this.actorStone() : current.mode === 'ai' ? current.humanStone : current.myStone;
           if (config.mode === 'online') config.link.send({ type: 'resign' });
           this.resignAs(loser);
         },
@@ -293,6 +492,7 @@ export class GameScreen extends Container {
     if (winner === null) this.status.text = '平局';
     else if (myStone === null) this.status.text = `${stoneName(winner)}获胜！`;
     else this.status.text = winner === myStone ? '你赢了！' : reason === 'resign' ? '你认输了' : '对手连成五子';
+    this.fitStatus();
     if (winner !== null && (myStone === null || winner === myStone)) sfx.win();
     else sfx.lose();
     say(this.announcement(winner, myStone, reason), { delay: 0.35 });
@@ -316,7 +516,7 @@ export class GameScreen extends Container {
     const delay = line ? 1800 : 900;
     window.setTimeout(() => {
       if (this.destroyed) return;
-      void navigation.goTo(new ResultScreen(outcome, config.mode === 'online' ? { link: config.link, round: config.round, myStone: config.myStone, rule: this.game.rule } : undefined, () => this.replayConfig()));
+      void navigation.goTo(new ResultScreen(outcome, config.mode === 'online' ? { link: config.link, round: config.round, myStone: config.myStone, rule: this.game.rule, opening: this.opening } : undefined, () => this.replayConfig()));
     }, delay);
   }
 
@@ -332,8 +532,9 @@ export class GameScreen extends Container {
     return resigned ? 'loseResign' : 'lose';
   }
 
+  /** "Play again" keeps the seats the game started with, before any opening swap. */
   private replayConfig(): GameConfig {
-    return this.config;
+    return this.startConfig;
   }
 
   // ---- online -------------------------------------------------------------------------
@@ -343,9 +544,19 @@ export class GameScreen extends Container {
       link.onMessage((message: NetMessage) => {
         if (this.ended || this.config.mode !== 'online') return;
         const theirs = opponent(this.config.myStone);
+        const phase = this.phase();
+        // Each message is accepted only in its phase and only when it is the opponent's decision.
+        const theirTurn = this.seatOf(this.actorStone(phase)) === 'remote';
         if (message.type === 'move') {
-          if (message.index !== this.game.history.length || this.game.turn !== theirs) return;
+          if (message.index !== this.game.history.length || !theirTurn || (phase !== 'place' && phase !== 'play')) return;
           this.apply({ x: message.x, y: message.y });
+        } else if (message.type === 'swap') {
+          if (theirTurn && phase === 'swap') this.decideSwap(message.swap, false);
+        } else if (message.type === 'offer') {
+          const points = message.points.map(([x, y]) => ({ x, y }));
+          if (theirTurn && phase === 'offer' && this.validOffers(points)) this.submitOffers(points, false);
+        } else if (message.type === 'choose') {
+          if (theirTurn && phase === 'choose') this.keepOffer({ x: message.x, y: message.y }, false);
         } else if (message.type === 'resign') {
           this.resignAs(theirs);
         }
@@ -369,7 +580,9 @@ export class GameScreen extends Container {
         cancel: '回到主页',
         onConfirm: () => {
           this.opponentGone = false;
-          this.config = { mode: 'ai', brain: 'fox', humanStone: myStone, rule: this.game.rule };
+          this.config = { mode: 'ai', brain: 'fox', humanStone: myStone, rule: this.game.rule, opening: this.opening };
+          // Playing again from here is a game against the fox.
+          this.startConfig = this.config;
           this.ai = new AiPlayer('fox', this.game.rule);
           this.modeBar.setText('mode', this.modeText());
           this.undoButton.visible = true;
@@ -430,7 +643,8 @@ export class GameScreen extends Container {
       black.position.set(left - (black.cardWidth * cardScale) / 2, height * 0.3);
       white.position.set(right - (white.cardWidth * cardScale) / 2, height * 0.3);
       this.status.position.set(left, height * 0.3 - 40);
-      this.status.scale.set(Math.min(1, (side - 10) / (this.status.width / this.status.scale.x)));
+      this.statusMaxWidth = side - 10;
+      this.fitStatus();
       this.undoButton.scale.set(cardScale);
       this.resignButton.scale.set(cardScale);
       this.undoButton.position.set(right, height * 0.62);
@@ -446,7 +660,8 @@ export class GameScreen extends Container {
       white.position.set(width - 12 - white.cardWidth * cardScale, cardsY);
       const cardsBottom = cardsY + 92 * cardScale;
       this.status.position.set(width / 2, cardsBottom + 22);
-      this.status.scale.set(Math.min(1, (width - 32) / (this.status.width / this.status.scale.x)));
+      this.statusMaxWidth = width - 32;
+      this.fitStatus();
       const top = cardsBottom + 44;
       const bottom = 110;
       const boardSize = Math.min(width - 16, height - top - bottom);
