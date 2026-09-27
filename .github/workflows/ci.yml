@@ -1,0 +1,73 @@
+name: Test and deploy
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    name: Test and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: production-dist
+          path: dist
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy:
+    name: Deploy production
+    needs: checks
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://gomoku.douni.one
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: production-dist
+          path: dist
+      - name: Publish tested build to Netlify
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID }}
+        run: |
+          test -n "$NETLIFY_AUTH_TOKEN"
+          test -n "$NETLIFY_SITE_ID"
+          (cd dist && zip -qr "$RUNNER_TEMP/site.zip" .)
+          curl --fail-with-body --silent --show-error --max-time 120 \
+            -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            -H 'Content-Type: application/zip' \
+            --data-binary "@$RUNNER_TEMP/site.zip" \
+            "https://api.netlify.com/api/v1/sites/$NETLIFY_SITE_ID/deploys?title=$GITHUB_SHA" \
+            > "$RUNNER_TEMP/netlify-deploy.json"
+      - name: Verify published files
+        env:
+          DEPLOY_RESULT: ${{ runner.temp }}/netlify-deploy.json
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: node scripts/verify-deploy.mjs

@@ -35,10 +35,11 @@
 
 ## 开发
 
-需要 Node 22。
+需要 Node 22.23.3（见 `.nvmrc`，Vite 要求至少 22.12）。
 
 ```bash
-npm install
+nvm use           # 使用 .nvmrc 中的 Node 版本
+npm ci            # 按 package-lock.json 安装依赖
 npm run dev        # http://localhost:5173
 npm test           # 规则、AI、结算的单元测试（Vitest）
 npm run build      # tsc 类型检查 + vite 打包到 dist/
@@ -56,8 +57,32 @@ npm run build      # tsc 类型检查 + vite 打包到 dist/
 
 ## 部署
 
-纯静态站点。仓库根目录的 `netlify.toml` 已配好：构建命令 `npm run build`，发布目录 `dist`，Node 22。
+纯静态站点，无数据库、服务端环境变量或业务 API 密钥。
+
+- 正式域名：<https://gomoku.douni.one>
+- Netlify 地址：<https://pixi-gomoku.netlify.app>
+- 部署管理：<https://app.netlify.com/projects/pixi-gomoku>
+
+`.github/workflows/ci.yml` 在 PR 和 `main` 推送时运行 `npm ci`、26 项单元测试、类型检查与生产构建。
+只有 `main` 的检查通过后，才把同一份 `dist/` 构建产物通过 Netlify 官方 ZIP API 发布；
+发布后等待状态 `ready`，逐个下载产物并核对 SHA-256，包含 AI Worker 与动态加载资源。
+也可以在 GitHub Actions 手动运行 **Test and deploy**；仅 `main` 会发布正式站点。
+
+GitHub **Settings → Environments → production** 中需要：
+
+| 类型 | 名称 | 用途 |
+| --- | --- | --- |
+| Secret | `NETLIFY_AUTH_TOKEN` | Netlify 部署凭据，仅发布作业可用 |
+| Variable | `NETLIFY_SITE_ID` | `4a15eda8-12e1-48f1-a7e4-1e6a74a1cb30` |
+
+不要将部署 token 写进源码或 `VITE_*` 变量。需要更换凭据时，只更新 GitHub 环境 Secret。
+Cloudflare DNS 使用 `gomoku` CNAME 指向 `pixi-gomoku.netlify.app`，DNS only；TLS 由 Netlify 管理。
+如需回滚，在 Netlify 的 Deploys 中选择上一次成功部署并 **Publish deploy**。
+
+仓库根目录的 `netlify.toml` 也支持 Netlify 原生构建：测试后打包，发布目录 `dist`，Node 与 `.nvmrc` 一致。
 `vite.config.ts` 里 `base: './'`，放在任意子路径下也能用。
+
+在线房间依赖 PeerJS 公共信令和 WebRTC，部分防火墙/NAT 网络可能无法直连；人机与同屏模式不受影响。
 
 ## 目录
 
