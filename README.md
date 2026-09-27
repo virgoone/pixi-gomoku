@@ -68,10 +68,14 @@ npm run build      # tsc 类型检查 + vite 打包到 dist/
 - Netlify 地址：<https://pixi-gomoku.netlify.app>
 - 部署管理：<https://app.netlify.com/projects/pixi-gomoku>
 
-`.github/workflows/ci.yml` 在 PR 和 `main` 推送时运行 `npm ci`、26 项单元测试、类型检查与生产构建。
-只有 `main` 的检查通过后，才把同一份 `dist/` 构建产物通过 Netlify 官方 ZIP API 发布；
-发布后等待状态 `ready`，逐个下载产物并核对 SHA-256，包含 AI Worker 与动态加载资源。
-也可以在 GitHub Actions 手动运行 **Test and deploy**；仅 `main` 会发布正式站点。
+**自动 CI/CD 由 Netlify GitHub App 执行**：仓库的 `main` 推送后，Netlify 自动安装锁定依赖，
+执行 `npm test && npm run build`（26 项单元测试、类型检查、生产打包），全部成功才发布 `dist/`。
+构建命令和 Node 版本由 `netlify.toml` 管理；失败时保留上一版正式站点。
+
+GitHub Actions 的 `.github/workflows/ci.yml` 保留为手动备用发布流程 **Manual test and deploy**。
+2026-09-27 配置时，GitHub 托管运行器因账户付款/支出额度问题无法启动，因此不依赖它自动发布。
+账户恢复后可在 Actions 手动运行；该流程先测试构建，再把同一份 `dist/` 通过 Netlify 官方 ZIP API 发布，
+等待状态 `ready` 后逐个下载产物并核对 SHA-256（包含 AI Worker 与动态加载资源）。仅 `main` 会发布正式站点。
 
 GitHub **Settings → Environments → production** 中需要：
 
@@ -84,7 +88,7 @@ GitHub **Settings → Environments → production** 中需要：
 Cloudflare DNS 使用 `gomoku` CNAME 指向 `pixi-gomoku.netlify.app`，DNS only；TLS 由 Netlify 管理。
 如需回滚，在 Netlify 的 Deploys 中选择上一次成功部署并 **Publish deploy**。
 
-仓库根目录的 `netlify.toml` 也支持 Netlify 原生构建：测试后打包，发布目录 `dist`，Node 与 `.nvmrc` 一致。
+仓库根目录的 `netlify.toml` 是自动构建配置：测试后打包，发布目录 `dist`，Node 与 `.nvmrc` 一致。
 `vite.config.ts` 里 `base: './'`，放在任意子路径下也能用。
 
 在线房间依赖 PeerJS 公共信令和 WebRTC，部分防火墙/NAT 网络可能无法直连；人机与同屏模式不受影响。
