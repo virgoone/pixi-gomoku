@@ -4,9 +4,9 @@ import gsap from 'gsap';
 import { sfx } from '../app/audio';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
-import { RULE_NAMES } from '../gomoku/renju';
-import { BLACK, type Rule, type Stone, WHITE } from '../gomoku/rules';
-import { agreedRule, type HostedRoom, hostRoom, joinRoom, type OnlineLink } from '../net/online';
+import { nextVariant, normalizeVariant, type Variant, variantName } from '../gomoku/opening';
+import { BLACK, type Stone, WHITE } from '../gomoku/rules';
+import { agreedVariant, type HostedRoom, hostRoom, joinRoom, type OnlineLink } from '../net/online';
 import { Button } from '../ui/Button';
 import { label } from '../ui/Label';
 import { BasePopup } from './BasePopup';
@@ -15,9 +15,9 @@ const WAIT_SECONDS = 30;
 
 type Callbacks = {
   /** `notice` explains a rule the host asked for but could not get. */
-  onStart: (link: OnlineLink, myStone: Stone, rule: Rule, notice?: string) => void;
+  onStart: (link: OnlineLink, myStone: Stone, variant: Variant, notice?: string) => void;
   /** Nobody joined: play the AI instead, under the rule the host picked. */
-  onFallback: (rule: Rule) => void;
+  onFallback: (variant: Variant) => void;
 };
 
 /** How long the host waits for the guest's hello (it carries the protocol version). */
@@ -40,7 +40,7 @@ export class OnlinePopup extends BasePopup {
   private slots: Text[] = [];
   private status: Text | null = null;
   private joining = false;
-  private rule: Rule = getProfile().rule;
+  private variant: Variant = normalizeVariant(getProfile().rule, getProfile().opening);
   private ruleButton: Button | null = null;
   private keyHandler = (event: KeyboardEvent) => this.onKey(event);
 
@@ -75,7 +75,7 @@ export class OnlinePopup extends BasePopup {
     hint.y = -165;
     const create = new Button({ text: '创建房间', skin: 'green', width: 320, height: 88, icon: 'users', onPress: () => void this.host() });
     create.y = -60;
-    this.ruleButton = new Button({ text: this.ruleText(), skin: 'white', width: 320, height: 62, fontSize: 20, onPress: () => this.toggleRule() });
+    this.ruleButton = new Button({ text: this.ruleText(), skin: 'white', width: 400, height: 62, fontSize: 19, onPress: () => this.toggleRule() });
     this.ruleButton.y = 30;
     const join = new Button({ text: '输入房间号', skin: 'blue', width: 320, height: 88, icon: 'globe', onPress: () => this.showJoin('') });
     join.y = 130;
@@ -85,12 +85,12 @@ export class OnlinePopup extends BasePopup {
   }
 
   private ruleText() {
-    return this.rule === 'renju' ? `房间规则：${RULE_NAMES.renju} · 黑棋有禁手` : `房间规则：${RULE_NAMES.freestyle}`;
+    return `房间规则：${variantName(this.variant)}`;
   }
 
   private toggleRule() {
-    this.rule = this.rule === 'renju' ? 'freestyle' : 'renju';
-    updateProfile({ rule: this.rule });
+    this.variant = nextVariant(this.variant);
+    updateProfile({ rule: this.variant.rule, opening: this.variant.opening });
     this.ruleButton?.setText(this.ruleText());
   }
 
@@ -118,7 +118,7 @@ export class OnlinePopup extends BasePopup {
     this.reset();
     const room = this.room;
     if (import.meta.env.DEV) (window as unknown as { __gomokuRoom?: string }).__gomokuRoom = room.code;
-    const caption = label(this.rule === 'renju' ? `房间号 · ${RULE_NAMES.renju}（黑棋有禁手）` : '房间号', 'body', { fontSize: 18 });
+    const caption = label(this.variant.rule === 'renju' ? `房间号 · ${variantName(this.variant)}` : '房间号', 'body', { fontSize: 18 });
     caption.y = -170;
     const code = label(room.code.split('').join(' '), 'title', { fontSize: 72, fill: 0xffd23f });
     code.y = -110;
@@ -192,12 +192,20 @@ export class OnlinePopup extends BasePopup {
         this.fallback();
         return;
       }
-      const rule = agreedRule(this.rule, link.opponentProtocol);
-      // No hello within the wait (protocol 0) is not the same as an old client: say which.
-      const notice = rule === this.rule ? undefined : link.opponentProtocol === 0 ? '没等到对方的版本信息，本局按无禁手进行' : '对方的版本还不支持连珠，本局按无禁手进行';
-      link.send({ type: 'start', hostStone: BLACK, round: 1, rule });
-      void navigation.dismissPopup().then(() => this.callbacks.onStart(link, BLACK, rule, notice));
+      const variant = agreedVariant(this.variant, link.opponentProtocol);
+      const notice = this.fallbackNotice(variant, link.opponentProtocol);
+      link.send({ type: 'start', hostStone: BLACK, round: 1, rule: variant.rule, opening: variant.opening });
+      void navigation.dismissPopup().then(() => this.callbacks.onStart(link, BLACK, variant, notice));
     });
+  }
+
+  /** Why the room plays less than the host asked for, or undefined if it plays it all. */
+  private fallbackNotice(agreed: Variant, protocol: number) {
+    if (agreed.rule === this.variant.rule && agreed.opening === this.variant.opening) return undefined;
+    const plays = variantName(agreed);
+    // No hello within the wait (protocol 0) is not the same as an old client: say which.
+    if (protocol === 0) return `没等到对方的版本信息，本局按${plays}进行`;
+    return agreed.rule === this.variant.rule ? `对方的版本还不支持三手交换，本局按${plays}进行` : `对方的版本还不支持连珠，本局按${plays}进行`;
   }
 
   private fallback() {
@@ -205,8 +213,8 @@ export class OnlinePopup extends BasePopup {
     this.room?.cancel();
     this.room = null;
     this.started = true;
-    const rule = this.rule;
-    void navigation.dismissPopup().then(() => this.callbacks.onFallback(rule));
+    const variant = this.variant;
+    void navigation.dismissPopup().then(() => this.callbacks.onFallback(variant));
   }
 
   // ---- joining ------------------------------------------------------------------------
@@ -281,8 +289,8 @@ export class OnlinePopup extends BasePopup {
         this.started = true;
         const myStone: Stone = message.hostStone === BLACK ? WHITE : BLACK;
         sfx.win();
-        const rule = message.rule;
-        void navigation.dismissPopup().then(() => this.callbacks.onStart(link, myStone, rule));
+        const variant = { rule: message.rule, opening: message.opening };
+        void navigation.dismissPopup().then(() => this.callbacks.onStart(link, myStone, variant));
       });
       link.onClose((reason) => {
         if (!this.started && this.status) this.status.text = reason;

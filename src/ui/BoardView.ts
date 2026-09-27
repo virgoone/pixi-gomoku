@@ -28,6 +28,12 @@ export class BoardView extends Container {
   /** Red crosses on points black may not play (renju). */
   private forbiddenMarks = new Graphics();
   private forbidden = new Set<number>();
+  /** RIF opening: the area the next opening stone must go in. */
+  private zoneMarks = new Graphics();
+  private zoneRadius: number | null = null;
+  /** RIF opening: candidate 5th moves, drawn as see-through black stones. */
+  private offerLayer = new Container();
+  private offers: Point[] = [];
   private nodes = new Map<number, StoneNode>();
   private pixelSize = 600;
   private cell = 40;
@@ -39,6 +45,8 @@ export class BoardView extends Container {
 
   /** Whether the local player may place a stone right now. */
   acceptingInput = false;
+  /** Whether hovering shows a stone preview (off while picking among offered points). */
+  ghostEnabled = true;
   /** Colour of the ghost preview. */
   turnStone: Stone = BLACK;
   onCell: (point: Point) => void = () => undefined;
@@ -49,7 +57,7 @@ export class BoardView extends Container {
     this.ghost.anchor.set(0.5);
     this.ghost.alpha = 0;
     this.lastMarker.visible = false;
-    this.addChild(this.boardSprite, this.grid, this.forbiddenMarks, this.shadows, this.stones, this.lastMarker, this.ghost, this.winGraphics, this.overlay);
+    this.addChild(this.boardSprite, this.grid, this.zoneMarks, this.forbiddenMarks, this.shadows, this.stones, this.offerLayer, this.lastMarker, this.ghost, this.winGraphics, this.overlay);
 
     this.eventMode = 'static';
     this.on('pointermove', (event) => this.handleHover(event));
@@ -84,6 +92,8 @@ export class BoardView extends Container {
     if (this.pendingTouch) this.showGhost(this.pendingTouch, 0.6);
     this.placeLastMarker();
     this.drawForbidden();
+    this.drawZone();
+    this.drawOffers();
   }
 
   private drawGrid() {
@@ -127,6 +137,44 @@ export class BoardView extends Container {
     this.drawForbidden();
   }
 
+  /** Highlight the centre square of this Chebyshev radius; null clears it. */
+  setZone(radius: number | null) {
+    this.zoneRadius = radius;
+    this.drawZone();
+  }
+
+  private drawZone() {
+    const g = this.zoneMarks.clear();
+    if (this.zoneRadius === null) return;
+    const center = Math.floor(this.size / 2);
+    const from = this.toLocal2({ x: center - this.zoneRadius, y: center - this.zoneRadius });
+    const side = (this.zoneRadius * 2 + 1) * this.cell;
+    const half = this.cell / 2;
+    g.roundRect(from.x - half, from.y - half, side, side, this.cell * 0.3)
+      .fill({ color: 0xffd23f, alpha: 0.18 })
+      .stroke({ color: 0xffb400, width: Math.max(2, this.cell * 0.06), alpha: 0.8 });
+  }
+
+  /** Show candidate 5th moves; an empty list clears them. */
+  setOffers(points: Point[]) {
+    this.offers = points.map((point) => ({ x: point.x, y: point.y }));
+    this.drawOffers();
+  }
+
+  private drawOffers() {
+    for (const child of this.offerLayer.removeChildren()) child.destroy();
+    for (const point of this.offers) {
+      const { x, y } = this.toLocal2(point);
+      const stone = new Sprite(tex('stone-black'));
+      stone.anchor.set(0.5);
+      stone.width = stone.height = this.cell * 0.92;
+      stone.alpha = 0.5;
+      stone.position.set(x, y);
+      const ring = new Graphics().circle(x, y, this.cell * 0.5).stroke({ color: 0xffd23f, width: Math.max(2, this.cell * 0.08) });
+      this.offerLayer.addChild(stone, ring);
+    }
+  }
+
   private drawForbidden() {
     const g = this.forbiddenMarks.clear();
     const arm = this.cell * 0.2;
@@ -140,7 +188,7 @@ export class BoardView extends Container {
   private handleHover(event: FederatedPointerEvent) {
     if (event.pointerType === 'touch') return;
     const point = this.pointFromEvent(event);
-    if (!this.acceptingInput || !point || this.occupied(point) || this.isForbidden(point)) {
+    if (!this.acceptingInput || !this.ghostEnabled || !point || this.occupied(point) || this.isForbidden(point)) {
       this.hideGhost();
       return;
     }
@@ -152,7 +200,7 @@ export class BoardView extends Container {
     if (!this.acceptingInput || !point || this.occupied(point)) return;
     // Touch: the first tap previews, a second tap on the same point confirms.
     // A forbidden point goes straight through so the game can say why it is refused.
-    if (event.pointerType === 'touch' && !this.isForbidden(point)) {
+    if (event.pointerType === 'touch' && this.ghostEnabled && !this.isForbidden(point)) {
       if (!this.pendingTouch || this.pendingTouch.x !== point.x || this.pendingTouch.y !== point.y) {
         this.pendingTouch = point;
         this.showGhost(point, 0.6);
@@ -248,6 +296,8 @@ export class BoardView extends Container {
   clear() {
     this.hideGhost();
     this.setForbidden([]);
+    this.setZone(null);
+    this.setOffers([]);
     for (const index of [...this.nodes.keys()]) this.removeStone(index % this.size, Math.floor(index / this.size));
     this.clearWin();
     this.setLastMove(null);

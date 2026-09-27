@@ -48,7 +48,7 @@ async function think(board: Uint8Array, stone: 1 | 2, rule: 'freestyle' | 'renju
   (scope.onmessage as (event: { data: unknown }) => void)({ data: { type: 'think', id, board, stone, rule, timeMs: 300 } });
   const reply = await next((m) => (m.type === 'move' || m.type === 'failed') && m.id === id);
   if (reply.type === 'failed') throw new Error(String(reply.message));
-  return { x: reply.x as number, y: reply.y as number };
+  return { x: reply.x as number, y: reply.y as number, score: reply.score as number | null };
 }
 
 describe('master engine (Rapfi wasm)', () => {
@@ -74,6 +74,19 @@ describe('master engine (Rapfi wasm)', () => {
     expect(move.y).toBeLessThan(15);
   });
 
+  test('reports its evaluation, with the sign of the side to move', async () => {
+    const board = createBoard();
+    board[7 * 15 + 7] = BLACK;
+    board[6 * 15 + 7] = WHITE;
+    board[6 * 15 + 8] = BLACK;
+    expect(typeof (await think(board, WHITE, 'renju')).score).toBe('number');
+    // White to move against an open four is lost: the score must be negative.
+    const lost = createBoard();
+    for (const x of [5, 6, 7, 8]) lost[7 * 15 + x] = BLACK;
+    for (const [x, y] of [[0, 0], [14, 14], [0, 14]]) lost[y * 15 + x] = WHITE;
+    expect((await think(lost, WHITE, 'freestyle')).score).toBeLessThan(0);
+  });
+
   test.each(['freestyle', 'renju'] as const)('blocks an open four as white (%s)', async (rule) => {
     const board = createBoard();
     for (const x of [5, 6, 7, 8]) board[7 * 15 + x] = BLACK;
@@ -90,7 +103,7 @@ describe('master engine (Rapfi wasm)', () => {
     for (const [x, y] of [[1, 2], [12, 12], [13, 12], [0, 14], [14, 0], [14, 14], [0, 13], [13, 0]]) board[y * 15 + x] = WHITE;
     expect(forbiddenAt(board, 7, 7)).toBe('double-three');
     const move = await think(board, BLACK, 'renju');
-    expect(move).toEqual({ x: 6, y: 2 });
+    expect({ x: move.x, y: move.y }).toEqual({ x: 6, y: 2 });
   });
 
   test('plays a legal game against itself under renju', async () => {

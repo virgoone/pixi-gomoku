@@ -1,5 +1,6 @@
 import { navigation } from '../app/navigation';
 import type { BrainId } from '../gomoku/ai';
+import type { Opening } from '../gomoku/opening';
 import { BLACK, type Rule, WHITE } from '../gomoku/rules';
 import type { Outcome } from '../result/scoring';
 import { GameScreen } from '../screens/GameScreen';
@@ -11,6 +12,8 @@ import { ResultScreen } from '../screens/ResultScreen';
  *   ?demo=loss | ?demo=draw            badge screens
  *   ?demo=game&brain=fox               straight into a game
  *     &rule=renju                      … under renju rules
+ *     &opening=rif                     … with the RIF opening (renju only)
+ *     &first=white                     … the AI places the opening / plays black
  *     &setup=5,7;0,0;6,7                … with these moves played first (black first)
  *   add &rated to the result demos to submit a real game to the leaderboard
  */
@@ -19,7 +22,9 @@ export async function runDemo(params: URLSearchParams) {
   const brain = (params.get('brain') ?? 'fox') as BrainId;
   if (demo === 'game') {
     const rule = (params.get('rule') ?? 'freestyle') as Rule;
-    const screen = new GameScreen({ mode: 'ai', brain, humanStone: BLACK, rule });
+    const opening = (params.get('opening') ?? 'free') as Opening;
+    const humanStone = params.get('first') === 'white' ? WHITE : BLACK;
+    const screen = new GameScreen({ mode: 'ai', brain, humanStone, rule, opening });
     const setup = (params.get('setup') ?? '').split(';').filter(Boolean).map((move) => move.split(',').map(Number) as [number, number]);
     screen.preload(setup);
     await navigation.goTo(screen);

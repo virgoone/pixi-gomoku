@@ -16,7 +16,10 @@ const THINK_TIMEOUT_MS = MASTER_TIME_MS * 8;
 /** A download (or engine start) that makes no progress this long has stalled. */
 const LOAD_STALL_MS = 20_000;
 
-type Pending = { resolve: (point: Point) => void; reject: (error: Error) => void; timer: number };
+/** A move and the engine's evaluation of the position for the side to move (null if unknown). */
+export type EngineMove = Point & { score: number | null };
+
+type Pending = { resolve: (move: EngineMove) => void; reject: (error: Error) => void; timer: number };
 
 class MasterEngine {
   private worker: Worker | null = null;
@@ -69,7 +72,7 @@ class MasterEngine {
         } else if (message.type === 'error') {
           window.clearTimeout(stall);
           reject(new Error(message.message));
-        } else if (message.type === 'move') this.settle(message.id, { x: message.x, y: message.y });
+        } else if (message.type === 'move') this.settle(message.id, { x: message.x, y: message.y, score: typeof message.score === 'number' ? message.score : null });
         else if (message.type === 'failed') this.settle(message.id, new Error(message.message));
       };
       worker.onerror = (event) => {
@@ -94,7 +97,7 @@ class MasterEngine {
     this.setState({ status: 'error', progress: 0, error: error.message });
   }
 
-  private settle(id: number, result: Point | Error) {
+  private settle(id: number, result: EngineMove | Error) {
     const request = this.pending.get(id);
     if (!request) return;
     this.pending.delete(id);
@@ -103,15 +106,16 @@ class MasterEngine {
     else request.resolve(result);
   }
 
-  async think(board: Board, stone: Stone, rule: Rule): Promise<Point> {
+  /** The engine's move for `stone` to play, with its evaluation. `timeMs` is the thinking budget. */
+  async think(board: Board, stone: Stone, rule: Rule, timeMs = MASTER_TIME_MS): Promise<EngineMove> {
     await this.load();
     const worker = this.worker;
     if (!worker) throw new Error('引擎未加载');
     const id = this.nextId++;
-    return await new Promise<Point>((resolve, reject) => {
-      const timer = window.setTimeout(() => this.fail(new Error('引擎超时')), THINK_TIMEOUT_MS);
+    return await new Promise<EngineMove>((resolve, reject) => {
+      const timer = window.setTimeout(() => this.fail(new Error('引擎超时')), Math.max(THINK_TIMEOUT_MS, timeMs * 8));
       this.pending.set(id, { resolve, reject, timer });
-      worker.postMessage({ type: 'think', id, board: new Uint8Array(board), stone, rule, timeMs: MASTER_TIME_MS });
+      worker.postMessage({ type: 'think', id, board: new Uint8Array(board), stone, rule, timeMs });
     });
   }
 }

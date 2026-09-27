@@ -1,5 +1,6 @@
 import type { DataConnection, Peer as PeerType } from 'peerjs';
 
+import type { Opening, Variant } from '../gomoku/opening';
 import type { Rule, Stone } from '../gomoku/rules';
 
 /**
@@ -10,17 +11,28 @@ import type { Rule, Stone } from '../gomoku/rules';
  */
 
 const PREFIX = 'pixi-gomoku-v1-';
-/** 1: first release. 2: `start` carries the rule (renju rooms). */
-export const PROTOCOL = 2;
+/**
+ * 1: first release. 2: `start` carries the rule (renju rooms).
+ * 3: `start` carries the opening; swap / offer / choose messages for the RIF opening.
+ */
+export const PROTOCOL = 3;
 /** Oldest protocol that understands renju rooms. */
 export const RENJU_PROTOCOL = 2;
+/** Oldest protocol that understands the RIF opening. */
+export const OPENING_PROTOCOL = 3;
 const PING_MS = 5000;
 // Generous: background tabs throttle timers heavily; real disconnects arrive via the close event.
 const TIMEOUT_MS = 90000;
 
 export type NetMessage =
   | { type: 'hello'; name: string; protocol: number }
-  | { type: 'start'; hostStone: Stone; round: number; rule: Rule }
+  | { type: 'start'; hostStone: Stone; round: number; rule: Rule; opening: Opening }
+  /** RIF opening: the tentative white's decision after three stones. */
+  | { type: 'swap'; swap: boolean }
+  /** RIF opening: black's two candidate 5th moves. */
+  | { type: 'offer'; points: Array<[number, number]> }
+  /** RIF opening: the 5th move white keeps. */
+  | { type: 'choose'; x: number; y: number }
   | { type: 'move'; x: number; y: number; index: number }
   | { type: 'resign' }
   | { type: 'rematch' }
@@ -42,8 +54,25 @@ export function parseMessage(data: unknown): NetMessage | null {
     case 'start':
       // A host from before protocol 2 sends no rule: that room is free-style.
       return (m.hostStone === 1 || m.hostStone === 2) && isInt(m.round, 1, 1e6)
-        ? { type: 'start', hostStone: m.hostStone, round: m.round as number, rule: m.rule === 'renju' ? 'renju' : 'freestyle' }
+        ? {
+            type: 'start',
+            hostStone: m.hostStone,
+            round: m.round as number,
+            rule: m.rule === 'renju' ? 'renju' : 'freestyle',
+            // Protocol 2 hosts send no opening; the RIF opening needs renju.
+            opening: m.rule === 'renju' && m.opening === 'rif' ? 'rif' : 'free',
+          }
         : null;
+    case 'swap':
+      return typeof m.swap === 'boolean' ? { type: 'swap', swap: m.swap } : null;
+    case 'offer': {
+      const points = Array.isArray(m.points) ? m.points : null;
+      if (!points || points.length !== 2) return null;
+      const valid = points.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0], 0, 14) && isInt(p[1], 0, 14));
+      return valid ? { type: 'offer', points: points.map((p) => [p[0], p[1]] as [number, number]) } : null;
+    }
+    case 'choose':
+      return isInt(m.x, 0, 14) && isInt(m.y, 0, 14) ? { type: 'choose', x: m.x as number, y: m.y as number } : null;
     case 'move':
       return isInt(m.x, 0, 14) && isInt(m.y, 0, 14) && isInt(m.index, 0, 224) ? { type: 'move', x: m.x as number, y: m.y as number, index: m.index as number } : null;
     case 'resign':
@@ -79,6 +108,15 @@ async function createPeer(id?: string): Promise<PeerType> {
  */
 export function agreedRule(wanted: Rule, opponentProtocol: number): Rule {
   return wanted === 'renju' && opponentProtocol >= RENJU_PROTOCOL ? 'renju' : 'freestyle';
+}
+
+/**
+ * The rule and opening a room actually plays, given what the host asked for and
+ * the guest's protocol: each feature is dropped if the guest's client predates it.
+ */
+export function agreedVariant(wanted: Variant, opponentProtocol: number): Variant {
+  const rule = agreedRule(wanted.rule, opponentProtocol);
+  return { rule, opening: rule === 'renju' && wanted.opening === 'rif' && opponentProtocol >= OPENING_PROTOCOL ? 'rif' : 'free' };
 }
 
 export function randomCode() {

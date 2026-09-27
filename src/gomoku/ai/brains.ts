@@ -1,5 +1,6 @@
+import { equivalentOffers } from '../opening';
 import { forbiddenAt } from '../renju';
-import { BLACK, type Board, cloneBoard, EMPTY, opponent, type Point, type Rule, set, sizeOf, type Stone, winningLine } from '../rules';
+import { BLACK, type Board, cloneBoard, EMPTY, opponent, type Point, type Rule, set, sizeOf, type Stone, WHITE, winningLine } from '../rules';
 import { candidateMoves, evaluatePoint, type RankedMove, rankMoves, SCORE } from './patterns';
 
 export type BrainId = 'sprout' | 'fox' | 'owl' | 'master';
@@ -168,4 +169,37 @@ export function chooseMove(id: BrainId, board: Board, stone: Stone, random: Rand
     if (board[index] === EMPTY && legal(board, point, stone, rule)) return point;
   }
   return { x: 0, y: 0 };
+}
+
+// ---- RIF opening decisions (heuristic brains; the master asks its engine instead) ------
+
+/** The tentative white, with white to move after three stones: true to swap and take black. */
+export function heuristicSwap(board: Board, random: Random = Math.random): boolean {
+  const score = evaluateBoard(board, BLACK);
+  return score > 0 || (score === 0 && random() < 0.5);
+}
+
+/** Two 5th moves for black that are not symmetric to each other, `first` (or the best) first. */
+export function heuristicOffers(board: Board, rule: Rule, first?: Point): Point[] {
+  const ranked = legalMoves(board, rankMoves(board, BLACK, 0.9), BLACK, rule);
+  const a = first ?? ranked[0];
+  if (!a) return [];
+  const b = ranked.find((move) => !(move.x === a.x && move.y === a.y) && !equivalentOffers(board, a, move));
+  return b ? [{ x: a.x, y: a.y }, { x: b.x, y: b.y }] : [{ x: a.x, y: a.y }];
+}
+
+/** White keeps the offered 5th move that leaves the position best for white. */
+export function heuristicChoose(board: Board, offers: Point[]): Point {
+  let best = offers[0];
+  let bestScore = -Infinity;
+  for (const offer of offers) {
+    const work = cloneBoard(board);
+    set(work, offer.x, offer.y, BLACK);
+    const score = evaluateBoard(work, WHITE);
+    if (score > bestScore) {
+      bestScore = score;
+      best = offer;
+    }
+  }
+  return best;
 }

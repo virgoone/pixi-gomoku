@@ -7,7 +7,8 @@
  *
  * Messages in:  { type: 'load', base }  then  { type: 'think', id, board, stone, rule, timeMs }
  * Messages out: { type: 'progress', value } | { type: 'ready' } | { type: 'error', message }
- *               | { type: 'move', id, x, y } | { type: 'failed', id, message }
+ *               | { type: 'move', id, x, y, score } | { type: 'failed', id, message }
+ * `score` is the engine's evaluation for the side to move (null if it printed none).
  */
 
 type RapfiModule = { sendCommand: (command: string) => void };
@@ -83,7 +84,22 @@ function think(board: Uint8Array, stone: number, rule: string, timeMs: number) {
   const reply = output.filter((line) => /^\d+,\d+$/.test(line)).at(-1);
   if (!reply) throw new Error(output.find((line) => line.startsWith('ERROR')) ?? '引擎没有给出着法');
   const [x, y] = reply.split(',').map(Number);
-  return { x, y };
+  return { x, y, score: lastScore(output) };
+}
+
+/**
+ * The last "Eval" in the search log. Rapfi prints a number, a mate as "+M5" /
+ * "-M3" ("+M*" from its database), "VAL_INF" / "-VAL_INF", or "VAL_NONE".
+ */
+function lastScore(lines: string[]): number | null {
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const token = /Eval (\S+)/.exec(lines[index])?.[1];
+    if (!token || token === 'VAL_NONE') continue;
+    if (/M|VAL_INF/.test(token)) return token.startsWith('-') ? -30000 : 30000;
+    const value = Number(token);
+    if (Number.isFinite(value)) return value;
+  }
+  return null;
 }
 
 scope.onmessage = (event: MessageEvent) => {
@@ -95,8 +111,8 @@ scope.onmessage = (event: MessageEvent) => {
     );
   } else if (message.type === 'think') {
     try {
-      const { x, y } = think(message.board, message.stone, message.rule, message.timeMs);
-      scope.postMessage({ type: 'move', id: message.id, x, y });
+      const { x, y, score } = think(message.board, message.stone, message.rule, message.timeMs);
+      scope.postMessage({ type: 'move', id: message.id, x, y, score });
     } catch (error) {
       scope.postMessage({ type: 'failed', id: message.id, message: error instanceof Error ? error.message : String(error) });
     }

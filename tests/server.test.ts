@@ -117,9 +117,12 @@ describe('replay judge', () => {
   });
 
   it('counts resignations only after both sides moved', () => {
-    expect(judge({ mode: 'online', myStone: 1, moves: [[7, 7], [8, 8]], resigned: 2 })).toBe('win');
-    expect(judge({ mode: 'online', myStone: 1, moves: [[7, 7], [8, 8]], resigned: 1 })).toBe('loss');
+    const five: Array<[number, number]> = [[7, 7], [8, 8], [6, 6], [9, 9], [5, 7]];
+    expect(judge({ mode: 'online', myStone: 1, moves: five, resigned: 2 })).toBe('win');
+    expect(judge({ mode: 'online', myStone: 1, moves: five, resigned: 1 })).toBe('loss');
     expect(() => judge({ mode: 'online', myStone: 1, moves: [[7, 7]], resigned: 2 })).toThrow(/太短/);
+    // Under the RIF opening one player places the first three stones: a resign then earns nothing.
+    expect(() => judge({ mode: 'online', myStone: 1, moves: [[7, 7], [7, 6], [8, 5]], resigned: 2 })).toThrow(/太短/);
   });
 });
 
