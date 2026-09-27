@@ -86,7 +86,10 @@ export class LeaderboardView extends Container {
       void this.loadMe();
       this.render();
     });
-    this.unsubscribeProgress = account.progress.onChange(() => this.renderFooter());
+    this.unsubscribeProgress = account.progress.onChange(() => {
+      this.renderFooter();
+      if (this.active && account.progress.state === 'synced') this.feed.poke();
+    });
   }
 
   /** Start live updates (the tab became visible). */
@@ -280,7 +283,7 @@ export class LeaderboardView extends Container {
       out.position.set(49, 35);
     }
     const state = account.progress.state;
-    const sync = label(state === 'syncing' ? '正在同步本机存档…' : state === 'error' ? '存档同步失败 · 点击重试' : '存档已同步 · 历史战绩在「战绩」页', 'small', { fontSize: 12, fill: state === 'error' ? 0xffd84a : 0xc9bde8 });
+    const sync = label(state === 'syncing' ? '正在同步本机存档…' : state === 'error' ? '存档同步失败 · 点击重试' : '存档已同步 · 胜负包含历史战绩', 'small', { fontSize: 12, fill: state === 'error' ? 0xffd84a : 0xc9bde8 });
     sync.y = compact ? -14 : 31;
     if (sync.width > this.w - 48) sync.scale.set((this.w - 48) / sync.width);
     sync.eventMode = 'static';
