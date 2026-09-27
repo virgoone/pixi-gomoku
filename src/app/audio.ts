@@ -1,4 +1,5 @@
 import { getProfile, updateProfile } from './storage';
+import { stopSpeaking } from './voice';
 
 /** Tiny synthesised sound effects: no audio files to load. */
 
@@ -57,8 +58,15 @@ export const sfx = {
     noise(0.05, 0.4, 2400);
   },
   invalid: () => tone(160, 0.14, { type: 'square', gain: 0.06 }),
-  win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.35, { type: 'triangle', gain: 0.18, delay: i * 0.1 })),
-  lose: () => [392, 330, 262].forEach((f, i) => tone(f, 0.4, { type: 'sine', gain: 0.16, delay: i * 0.16 })),
+  win: () => {
+    [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.35, { type: 'triangle', gain: 0.18, delay: i * 0.1 }));
+    // Final chord.
+    [1047, 1319, 1568].forEach((f) => tone(f, 0.9, { type: 'triangle', gain: 0.09, delay: 0.45 }));
+  },
+  lose: () => {
+    [392, 330, 262].forEach((f, i) => tone(f, 0.4, { type: 'sine', gain: 0.16, delay: i * 0.16 }));
+    tone(196, 0.9, { type: 'sine', gain: 0.12, delay: 0.5, slide: 150 });
+  },
   land: () => {
     tone(90, 0.25, { gain: 0.4, slide: 50 });
     noise(0.12, 0.25, 600);
@@ -77,5 +85,8 @@ export const sfx = {
 
 export function setMuted(muted: boolean) {
   updateProfile({ muted });
-  if (muted) void context?.suspend();
+  if (muted) {
+    void context?.suspend();
+    stopSpeaking();
+  }
 }

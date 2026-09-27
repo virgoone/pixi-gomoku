@@ -27,6 +27,30 @@ export type NetMessage =
 
 export type Role = 'host' | 'guest';
 
+const isInt = (value: unknown, min: number, max: number) => Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
+
+/** Data from the other peer is untrusted: accept only well-formed messages. */
+export function parseMessage(data: unknown): NetMessage | null {
+  if (!data || typeof data !== 'object') return null;
+  const m = data as Record<string, unknown>;
+  switch (m.type) {
+    case 'hello':
+      return typeof m.name === 'string' ? { type: 'hello', name: m.name, protocol: Number(m.protocol) || 0 } : null;
+    case 'start':
+      return (m.hostStone === 1 || m.hostStone === 2) && isInt(m.round, 1, 1e6) ? { type: 'start', hostStone: m.hostStone, round: m.round as number } : null;
+    case 'move':
+      return isInt(m.x, 0, 14) && isInt(m.y, 0, 14) && isInt(m.index, 0, 224) ? { type: 'move', x: m.x as number, y: m.y as number, index: m.index as number } : null;
+    case 'resign':
+    case 'rematch':
+    case 'full':
+    case 'ping':
+    case 'bye':
+      return { type: m.type };
+    default:
+      return null;
+  }
+}
+
 async function createPeer(id?: string): Promise<PeerType> {
   const { Peer } = await import('peerjs');
   return await new Promise((resolve, reject) => {
@@ -72,17 +96,17 @@ export class OnlineLink {
   ) {
     conn.on('data', (data) => {
       this.lastSeen = Date.now();
-      const message = data as NetMessage;
-      if (message?.type === 'ping') return;
-      if (message?.type === 'bye') {
+      const message = parseMessage(data);
+      if (!message || message.type === 'ping') return;
+      if (message.type === 'bye') {
         this.finish('对手已离开房间');
         return;
       }
-      if (message?.type === 'full') {
+      if (message.type === 'full') {
         this.finish('房间已满');
         return;
       }
-      if (message?.type === 'hello') this.opponentName = message.name.slice(0, 12) || '好友';
+      if (message.type === 'hello') this.opponentName = message.name.slice(0, 12) || '好友';
       for (const listener of this.listeners) listener(message);
     });
     conn.on('close', () => this.finish('连接已断开'));
@@ -131,8 +155,14 @@ export class OnlineLink {
     this.peer.destroy();
   }
 
-  /** Leave on purpose: tell the other side first. */
+  /**
+   * Leave on purpose: tell the other side first. Our own listeners are dropped
+   * right away, since "the opponent left" handlers must not fire for our own exit.
+   */
   close() {
+    if (this.closed) return;
+    this.listeners.clear();
+    this.closeListeners.clear();
     this.send({ type: 'bye' });
     window.setTimeout(() => this.finish('你离开了房间'), 120);
   }
@@ -190,17 +220,25 @@ export async function hostRoom(name: string, onGuest: (link: OnlineLink) => void
 export async function joinRoom(code: string, name: string): Promise<OnlineLink> {
   const peer = await createPeer();
   return await new Promise((resolve, reject) => {
-    const timer = window.setTimeout(() => {
-      peer.destroy();
-      reject(new Error('连接超时，请检查房间号或网络'));
-    }, 12000);
-    peer.on('error', (error: Error & { type?: string }) => {
+    let settled = false;
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
       window.clearTimeout(timer);
       peer.destroy();
-      reject(new Error(error.type === 'peer-unavailable' ? '房间不存在或已关闭' : '连接失败，请稍后再试'));
-    });
+      reject(new Error(message));
+    };
+    const timer = window.setTimeout(() => fail('连接超时，请检查房间号或网络'), 12000);
+    // Only errors before the connection opens mean "could not join"; later ones
+    // (e.g. the signalling server blipping) must not kill a live game.
+    peer.on('error', (error: Error & { type?: string }) => fail(error.type === 'peer-unavailable' ? '房间不存在或已关闭' : '连接失败，请稍后再试'));
     const conn = peer.connect(PREFIX + code, { reliable: true });
     conn.on('open', () => {
+      if (settled) {
+        conn.close();
+        return;
+      }
+      settled = true;
       window.clearTimeout(timer);
       const link = new OnlineLink('guest', code, peer, conn);
       link.send({ type: 'hello', name, protocol: PROTOCOL });

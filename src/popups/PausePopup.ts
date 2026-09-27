@@ -2,13 +2,15 @@ import { navigation } from '../app/navigation';
 import { setMuted } from '../app/audio';
 import { getProfile } from '../app/storage';
 import { Button } from '../ui/Button';
+import { label } from '../ui/Label';
 import { BasePopup } from './BasePopup';
 
 /** In-game menu. */
 export class PausePopup extends BasePopup {
-  constructor(options: { onRestart?: () => void; onHome: () => void }) {
+  constructor(options: { onRestart?: () => void; onHome: () => void; note?: string }) {
     const rows = options.onRestart ? 4 : 3;
-    super('暂停', 460, 170 + rows * 96);
+    const noteSpace = options.note ? 40 : 0;
+    super('暂停', 460, 170 + rows * 96 + noteSpace);
     const buttons: Button[] = [
       new Button({ text: '继续对局', skin: 'yellow', width: 300, icon: 'play', onPress: () => void navigation.dismissPopup() }),
     ];
@@ -32,5 +34,10 @@ export class PausePopup extends BasePopup {
       button.y = -this.panelHeight / 2 + 140 + index * 96;
       this.body.addChild(button);
     });
+    if (options.note) {
+      const note = label(options.note, 'small', { fontSize: 15, fill: 0xffc48a });
+      note.y = this.panelHeight / 2 - 44;
+      this.body.addChild(note);
+    }
   }
 }

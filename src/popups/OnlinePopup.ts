@@ -158,12 +158,24 @@ export class OnlinePopup extends BasePopup {
     sfx.win();
     // Give the guest a moment to subscribe before the start signal.
     window.setTimeout(() => {
+      if (this.destroyed) {
+        // Closed by the player in the meantime.
+        link.close();
+        return;
+      }
+      if (!link.isOpen) {
+        // The guest vanished before the game began: the room is spent, so play the AI.
+        this.started = false;
+        this.fallback();
+        return;
+      }
       link.send({ type: 'start', hostStone: BLACK, round: 1 });
       void navigation.dismissPopup().then(() => this.callbacks.onStart(link, BLACK));
     }, 400);
   }
 
   private fallback() {
+    if (this.started) return;
     this.room?.cancel();
     this.room = null;
     this.started = true;

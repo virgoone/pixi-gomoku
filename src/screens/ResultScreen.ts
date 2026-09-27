@@ -2,6 +2,7 @@ import { Container, NineSliceSprite, Sprite, type Text, type Ticker } from 'pixi
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
+import { speak } from '../app/voice';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
@@ -27,6 +28,13 @@ const REWARD_META: Record<RewardKey, { icon: string; name: string; currency: 'co
   gems: { icon: 'gem', name: '宝石', currency: 'gems' },
   crowns: { icon: 'crown', name: '连胜皇冠', currency: 'crowns' },
 };
+
+/** Split `total` into `parts` whole numbers that add up to it. */
+function splitAmount(total: number, parts: number) {
+  const count = Math.max(1, Math.min(parts, total));
+  const base = Math.floor(total / count);
+  return Array.from({ length: count }, (_, index) => base + (index < total - base * count ? 1 : 0));
+}
 
 const wait = (seconds: number) => new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 
@@ -57,6 +65,7 @@ export class ResultScreen extends Container {
   private time = 0;
   private waitingForTap: (() => void) | null = null;
   private collected = false;
+  private credited = false;
   private rematchSent = false;
   private rematchReceived = false;
   private unsubscribers: Array<() => void> = [];
@@ -137,7 +146,10 @@ export class ResultScreen extends Container {
     this.h = height;
     const textScale = Math.min(1, width / 460, height / 760);
     const uiScale = Math.min(1, width / 520, height / 820);
-    const headerTop = Math.max(64, height * 0.08);
+    const hudScale = Math.min(1, (width - 24) / (this.hud.totalWidth + 20));
+    // On narrow screens the HUD spans the width, so the header starts below it.
+    const hudBottom = 16 + this.hud.totalHeight * hudScale;
+    const headerTop = Math.max(64, height * 0.08, width < this.hud.totalWidth + 240 ? hudBottom + 34 : 0);
     this.eyebrow.scale.set(textScale);
     this.heading.scale.set(textScale);
     this.detail.scale.set(Math.min(textScale, (width - 32) / (this.detail.width / this.detail.scale.x)));
@@ -168,7 +180,6 @@ export class ResultScreen extends Container {
     this.cardsLayer.position.set(width / 2, this.floor + (40 + 75) * uiScale);
     this.buttonsLayer.scale.set(uiScale);
     this.buttonsLayer.position.set(width / 2, this.floor + (40 + 150 + 30 + 42) * uiScale);
-    const hudScale = Math.min(1, (width - 24) / (this.hud.totalWidth + 20));
     this.hud.scale.set(hudScale);
     this.hud.position.set(width - this.hud.totalWidth * hudScale - 14, 16);
   }
@@ -198,17 +209,21 @@ export class ResultScreen extends Container {
     // Drop in.
     chest.y = -this.h;
     await gsap.to(chest, { y: 0, duration: 0.5, ease: 'power3.in' });
+    if (this.destroyed) return;
     sfx.land();
     this.ringPulse();
     void chest.land();
     await wait(0.55);
+    if (this.destroyed) return;
 
     // Upgrade one tier at a time.
     for (let tier = 1; tier <= finalTier; tier += 1) {
       this.eyebrow.text = '升级！';
       await chest.charge(0.4);
+      if (this.destroyed) return;
       this.flashBurst(TIERS[tier as TierId].glow);
       sfx.upgrade();
+      speak('升级！', { rate: 1.2, pitch: 1.3 });
       chest.setTier(tier as TierId);
       this.backdrop.setTexture(`backdrop-tier-${tier}`, 0.35);
       this.backdrop.setRays({ tint: TIERS[tier as TierId].glow });
@@ -217,6 +232,7 @@ export class ResultScreen extends Container {
       void this.popText(this.heading);
       this.sparkleBurst(10 + tier * 6, scale);
       await wait(0.7);
+      if (this.destroyed) return;
     }
 
     // Wait for a tap.
@@ -228,6 +244,7 @@ export class ResultScreen extends Container {
       this.waitingForTap = resolve;
     });
     this.waitingForTap = null;
+    if (this.destroyed) return;
     this.cursor = 'default';
     hintTween.kill();
     idle.kill();
@@ -236,14 +253,17 @@ export class ResultScreen extends Container {
 
     // Open.
     sfx.open();
+    speak(`恭喜获得${TIERS[finalTier].name}！`, { delay: 0.2 });
     this.flashBurst(0xfff3b0, 1.6);
     this.backdrop.setRays({ alpha: 0.85, scale: this.backdrop.rays.scale.x * 1.25 }, 0.6);
     await chest.open();
+    if (this.destroyed) return;
     const mouth = chest.toGlobal(chest.mouth);
     this.confetti.burst(mouth.x, mouth.y, 110, Math.min(1100, this.h * 1.3));
     this.eyebrow.text = '你获得了';
     void this.popText(this.eyebrow);
     await this.showRewards(mouth);
+    if (this.destroyed) return;
     this.showCollect();
   }
 
@@ -256,11 +276,14 @@ export class ResultScreen extends Container {
     badge.y = -this.h;
     badge.rotation = -0.3;
     await gsap.to(badge, { y: 0, rotation: 0, duration: 0.6, ease: 'bounce.out' });
+    if (this.destroyed) return;
     sfx.land();
     this.ringPulse();
     gsap.to(badge, { rotation: 0.04, duration: 1.4, yoyo: true, repeat: -1, ease: 'sine.inOut' });
     await wait(0.3);
+    if (this.destroyed) return;
     await this.showRewards(badge.toGlobal({ x: 0, y: -120 }));
+    if (this.destroyed) return;
     this.showCollect();
   }
 
@@ -327,6 +350,7 @@ export class ResultScreen extends Container {
       gsap.to(card.scale, { x: 1, y: 1, duration: 0.55, ease: 'back.out(2)' });
       gsap.fromTo(card, { rotation: -0.4 }, { rotation: 0, duration: 0.55, ease: 'back.out(2)' });
       await wait(0.28);
+      if (this.destroyed) return;
     }
     await wait(0.4);
   }
@@ -342,30 +366,54 @@ export class ResultScreen extends Container {
     this.collected = true;
     // Let the pressed button finish its own pointer handlers before it goes away.
     for (const child of this.buttonsLayer.children) gsap.to(child, { alpha: 0, duration: 0.2 });
-    window.setTimeout(() => this.buttonsLayer.removeChildren().forEach((child) => child.destroy({ children: true })), 250);
-    const rewards = this.settlement.rewards;
-    // Fly each card's icon into the HUD, then credit the profile.
-    const flights = this.cardsLayer.children.map((card, index) => {
+    window.setTimeout(() => {
+      if (!this.destroyed) this.buttonsLayer.removeChildren().forEach((child) => child.destroy({ children: true }));
+    }, 250);
+    // Each card bursts into a handful of icons that fly into its HUD counter one by one;
+    // the counter ticks up as each lands. The profile is credited once at the end.
+    const flights = this.cardsLayer.children.map((card, cardIndex) => {
       const key = card.label as RewardKey;
+      const amount = this.settlement.rewards[key];
+      const pieces = key === 'coins' ? 10 : key === 'gems' ? 6 : Math.min(3, amount);
+      const shares = splitAmount(amount, pieces);
       const target = this.hud.iconPosition(REWARD_META[key].currency);
-      const icon = new Sprite(tex(REWARD_META[key].icon));
-      icon.anchor.set(0.5);
-      icon.width = icon.height = 60;
       const start = card.toGlobal({ x: 0, y: -26 });
-      icon.position.copyFrom(start);
-      this.addChild(icon);
-      gsap.to(card, { alpha: 0.35, duration: 0.3 });
-      return gsap
-        .timeline({ delay: index * 0.12 })
-        .to(icon, { x: target.x, y: target.y, duration: 0.6, ease: 'power2.in' })
-        .to(icon.scale, { x: icon.scale.x * 0.5, y: icon.scale.y * 0.5, duration: 0.6 }, 0)
-        .add(() => {
-          sfx.coin();
-          icon.destroy();
-        });
+      const startDelay = cardIndex * 0.18;
+      // The card itself pops away once its icons are out.
+      gsap.timeline({ delay: startDelay })
+        .to(card.scale, { x: 1.12, y: 1.12, duration: 0.12, ease: 'power2.out' })
+        .to(card.scale, { x: 0, y: 0, duration: 0.25, ease: 'back.in(2)' })
+        .to(card, { alpha: 0, duration: 0.1 }, '-=0.1');
+      return Promise.all(
+        shares.map((share, index) => {
+          const icon = new Sprite(tex(REWARD_META[key].icon));
+          icon.anchor.set(0.5);
+          icon.width = icon.height = key === 'coins' ? 40 : 46;
+          icon.position.copyFrom(start);
+          icon.alpha = 0;
+          this.addChild(icon);
+          const angle = -Math.PI / 2 + (Math.random() - 0.5) * 2.4;
+          const spread = 50 + Math.random() * 40;
+          const scatter = { x: start.x + Math.cos(angle) * spread, y: start.y + Math.sin(angle) * spread };
+          const base = icon.scale.x;
+          return gsap
+            .timeline({ delay: startDelay + 0.1 + index * 0.06 })
+            .set(icon, { alpha: 1 })
+            .to(icon, { x: scatter.x, y: scatter.y, duration: 0.28, ease: 'power2.out' })
+            .to(icon, { rotation: (Math.random() - 0.5) * 1.2, duration: 0.28 }, '<')
+            .to(icon, { x: target.x, y: target.y, rotation: 0, duration: 0.5, ease: 'power2.in' }, '+=0.08')
+            .to(icon.scale, { x: base * 0.6, y: base * 0.6, duration: 0.5, ease: 'power2.in' }, '<')
+            .add(() => {
+              sfx.coin();
+              this.hud.bump(REWARD_META[key].currency, share);
+              icon.destroy();
+            });
+        }),
+      );
     });
     await Promise.all(flights);
-    updateProfile((profile) => ({ coins: profile.coins + rewards.coins, gems: profile.gems + rewards.gems, crowns: profile.crowns + rewards.crowns }));
+    if (this.destroyed) return;
+    this.credit();
     this.showNextButtons();
   }
 
@@ -446,11 +494,15 @@ export class ResultScreen extends Container {
   onLeave() {
     window.removeEventListener('keydown', this.keyHandler);
     for (const unsubscribe of this.unsubscribers) unsubscribe();
-    // Never lose rewards: credit them if the player leaves before collecting.
-    if (!this.collected) {
-      this.collected = true;
-      const rewards = this.settlement.rewards;
-      updateProfile((profile) => ({ coins: profile.coins + rewards.coins, gems: profile.gems + rewards.gems, crowns: profile.crowns + rewards.crowns }));
-    }
+    // Never lose rewards: credit them if the player leaves before (or while) collecting.
+    this.credit();
+  }
+
+  /** Add this result's rewards to the profile, exactly once. */
+  private credit() {
+    if (this.credited) return;
+    this.credited = true;
+    const rewards = this.settlement.rewards;
+    updateProfile((profile) => ({ coins: profile.coins + rewards.coins, gems: profile.gems + rewards.gems, crowns: profile.crowns + rewards.crowns }));
   }
 }

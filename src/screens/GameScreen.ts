@@ -2,7 +2,9 @@ import { Container, type Text, type Ticker } from 'pixi.js';
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
+import { speak } from '../app/voice';
 import { navigation } from '../app/navigation';
+import { getProfile, updateProfile } from '../app/storage';
 import { AiPlayer, type BrainId, brainInfo } from '../gomoku/ai';
 import { BLACK, GomokuGame, opponent, type Point, type Stone, WHITE } from '../gomoku/rules';
 import type { NetMessage, OnlineLink } from '../net/online';
@@ -43,6 +45,8 @@ export class GameScreen extends Container {
   private token = 0;
   private unsubscribers: Array<() => void> = [];
   private ended = false;
+  /** The opponent walked out, so leaving now costs the player nothing. */
+  private opponentGone = false;
   private w = 0;
   private h = 0;
 
@@ -223,6 +227,7 @@ export class GameScreen extends Container {
     else this.status.text = winner === myStone ? '你赢了！' : reason === 'resign' ? '你认输了' : '对手连成五子';
     if (winner !== null && (myStone === null || winner === myStone)) sfx.win();
     else sfx.lose();
+    speak(this.announcement(winner, myStone, reason), { delay: 0.35 });
 
     const outcome: Outcome = {
       mode: config.mode,
@@ -239,6 +244,14 @@ export class GameScreen extends Container {
       if (this.destroyed) return;
       void navigation.goTo(new ResultScreen(outcome, config.mode === 'online' ? { link: config.link, round: config.round, myStone: config.myStone } : undefined, () => this.replayConfig()));
     }, delay);
+  }
+
+  /** What the announcer says when the game ends. */
+  private announcement(winner: Stone | null, myStone: Stone | null, reason: Outcome['reason']) {
+    if (winner === null) return '平局，势均力敌！';
+    if (myStone === null) return reason === 'resign' ? `${stoneName(opponent(winner))}认输，${stoneName(winner)}获胜！` : `五子连珠，${stoneName(winner)}获胜！`;
+    if (winner === myStone) return reason === 'resign' ? '对手认输，你赢了！' : '五子连珠，你赢了！';
+    return reason === 'resign' ? '你认输了，下次加油！' : '很遗憾，你输了，再接再厉！';
   }
 
   private replayConfig(): GameConfig {
@@ -266,6 +279,7 @@ export class GameScreen extends Container {
   private onOpponentLeft(reason: string) {
     if (this.ended || this.config.mode !== 'online' || this.destroyed) return;
     const myStone = this.config.myStone;
+    this.opponentGone = true;
     this.board.acceptingInput = false;
     toast(this, reason, this.w);
     void navigation.present(
@@ -275,6 +289,7 @@ export class GameScreen extends Container {
         confirm: '继续下',
         cancel: '回到主页',
         onConfirm: () => {
+          this.opponentGone = false;
           this.config = { mode: 'ai', brain: 'fox', humanStone: myStone };
           this.ai = new AiPlayer('fox');
           this.undoButton.visible = true;
@@ -288,10 +303,19 @@ export class GameScreen extends Container {
 
   // ---- menu ---------------------------------------------------------------------------
 
+  /** Leaving a rated game after you have moved ends the win streak. */
+  private get abandonCostsStreak() {
+    const config = this.config;
+    if (this.ended || this.opponentGone || config.mode === 'local') return false;
+    const me = config.mode === 'ai' ? config.humanStone : config.myStone;
+    return this.game.movesBy(me) > 0;
+  }
+
   private openMenu() {
     const config = this.config;
     void navigation.present(
       new PausePopup({
+        note: this.abandonCostsStreak && getProfile().streak > 0 ? `中途离开会中断 ${getProfile().streak} 连胜` : undefined,
         onRestart: config.mode === 'online' ? undefined : () => void navigation.goTo(new GameScreen(config)),
         onHome: () => {
           if (config.mode === 'online') config.link.close();
@@ -365,6 +389,7 @@ export class GameScreen extends Container {
   }
 
   onLeave() {
+    if (this.abandonCostsStreak && getProfile().streak > 0) updateProfile({ streak: 0 });
     this.token += 1;
     this.ai?.dispose();
     for (const unsubscribe of this.unsubscribers) unsubscribe();

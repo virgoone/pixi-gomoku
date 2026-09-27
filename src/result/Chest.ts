@@ -29,7 +29,7 @@ export class Chest extends Container {
     this.lid.y = -CHEST.bodyHeight + 20;
     this.lidOpen = new Sprite(tex(`chest-open-${tier}`));
     this.lidOpen.anchor.set(0.5, 1);
-    this.lidOpen.y = -CHEST.bodyHeight + 14;
+    this.lidOpen.y = -CHEST.bodyHeight - 34;
     this.lidOpen.visible = false;
     this.innerGlow = new Sprite(tex('glow'));
     this.innerGlow.anchor.set(0.5);
@@ -37,19 +37,20 @@ export class Chest extends Container {
     this.innerGlow.blendMode = 'add';
     this.innerGlow.width = 420;
     this.innerGlow.height = 260;
-    this.innerGlow.y = -CHEST.bodyHeight + 10;
+    this.innerGlow.y = -CHEST.bodyHeight - 10;
     this.innerGlow.alpha = 0;
     this.treasure = new Sprite(tex('treasure'));
     this.treasure.anchor.set(0.5, 1);
-    this.treasure.y = -CHEST.bodyHeight + 44;
+    // Its base tucks behind the body's top band so the heap sits inside the chest.
+    this.treasure.y = -CHEST.bodyHeight + 14;
     this.treasure.visible = false;
-    this.rig.addChild(this.lidOpen, this.innerGlow, this.body, this.treasure, this.lid);
+    this.rig.addChild(this.lidOpen, this.innerGlow, this.treasure, this.body, this.lid);
     this.addChild(this.rig);
   }
 
   /** Top of the chest in local coordinates; where rewards burst from. */
   get mouth() {
-    return { x: 0, y: -CHEST.bodyHeight - 20 };
+    return { x: 0, y: -CHEST.bodyHeight - 50 };
   }
 
   setTier(tier: TierId) {

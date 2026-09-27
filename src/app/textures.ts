@@ -14,7 +14,7 @@ const registry: Record<string, Entry> = {
   'stone-white': { svg: art.whiteStone, width: 100, height: 100 },
   'stone-shadow': { svg: art.stoneShadow, width: 100, height: 100 },
   board: { svg: art.board, width: 1000, height: 1000 },
-  treasure: { svg: art.chestTreasure, width: 240, height: 110 },
+  treasure: { svg: art.chestTreasure, width: art.CHEST.width, height: art.CHEST.treasureHeight },
   'badge-silver': { svg: () => art.badge('silver'), width: 220, height: 250 },
   'badge-bronze': { svg: () => art.badge('bronze'), width: 220, height: 250 },
   coin: { svg: art.coinIcon, width: 100, height: 100 },

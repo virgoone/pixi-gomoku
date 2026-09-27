@@ -32,6 +32,7 @@ export class BoardView extends Container {
   private time = 0;
   private pendingTouch: Point | null = null;
   private winGlows: Sprite[] = [];
+  private winTween: gsap.core.Tween | null = null;
 
   /** Whether the local player may place a stone right now. */
   acceptingInput = false;
@@ -228,7 +229,7 @@ export class BoardView extends Container {
     const first = this.toLocal2(line[0]);
     const last = this.toLocal2(line[line.length - 1]);
     const progress = { t: 0 };
-    gsap.to(progress, {
+    this.winTween = gsap.to(progress, {
       t: 1,
       duration: 0.5,
       ease: 'power2.out',
@@ -260,9 +261,16 @@ export class BoardView extends Container {
   }
 
   clearWin() {
+    this.winTween?.kill();
+    this.winTween = null;
     this.winGraphics.clear();
     for (const glow of this.winGlows) glow.destroy();
     this.winGlows = [];
+  }
+
+  override destroy(options?: Parameters<Container['destroy']>[0]) {
+    this.winTween?.kill();
+    super.destroy(options);
   }
 
   update(ticker: Ticker) {

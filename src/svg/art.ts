@@ -1,4 +1,4 @@
-import { GOLD, INK, SKINS, type SkinId, type TierColors } from './palette';
+import { GOLD, INK, SILVER, SKINS, type SkinId, type TierColors } from './palette';
 
 /**
  * Every visual in the game is an SVG string rasterised once at load time.
@@ -98,120 +98,182 @@ export const board = () => {
 
 // ---- chest --------------------------------------------------------------------------
 
-export const CHEST = { width: 240, bodyHeight: 160, lidHeight: 120 };
+export const CHEST = { width: 240, bodyHeight: 160, lidHeight: 120, treasureHeight: 130 };
 
+const metalOf = (tier: TierColors) => (tier.metal === 'gold' ? GOLD : SILVER);
+
+const metalGradient = (id: string, tier: TierColors, vertical = true) => {
+  const m = metalOf(tier);
+  return `
+  <linearGradient id="${id}" x1="0" y1="0" x2="${vertical ? 0 : 1}" y2="${vertical ? 1 : 0}">
+    <stop offset="0" stop-color="${m.light}"/>
+    <stop offset="0.5" stop-color="${m.base}"/>
+    <stop offset="1" stop-color="${m.dark}"/>
+  </linearGradient>`;
+};
+
+const paintGradient = (id: string, tier: TierColors) => `
+  <linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${tier.light}"/>
+    <stop offset="0.3" stop-color="${tier.base}"/>
+    <stop offset="1" stop-color="${tier.dark}"/>
+  </linearGradient>
+  <linearGradient id="${id}-side" x1="0" y1="0" x2="1" y2="0">
+    <stop offset="0" stop-color="#fff" stop-opacity="0.22"/>
+    <stop offset="0.25" stop-color="#fff" stop-opacity="0"/>
+    <stop offset="0.75" stop-color="#000" stop-opacity="0"/>
+    <stop offset="1" stop-color="#000" stop-opacity="0.22"/>
+  </linearGradient>`;
+
+const rivet = (x: number, y: number, tier: TierColors) =>
+  `<circle cx="${x}" cy="${y}" r="4.2" fill="${metalOf(tier).deep}"/><circle cx="${x - 1.2}" cy="${y - 1.2}" r="1.6" fill="#fff" fill-opacity="0.8"/>`;
+
+/** Front of the chest. The lid overlaps its top 20 units. */
 export const chestBody = (tier: TierColors) =>
   svg(CHEST.width, CHEST.bodyHeight, `
   <defs>
-    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${tier.light}"/>
-      <stop offset="0.35" stop-color="${tier.base}"/>
-      <stop offset="1" stop-color="${tier.dark}"/>
-    </linearGradient>
-    ${goldGradient('gold')}
-    ${goldGradient('goldH', false)}
+    ${paintGradient('paint', tier)}
+    ${metalGradient('metal', tier)}
+    ${metalGradient('metalH', tier, false)}
   </defs>
-  <rect x="14" y="16" width="212" height="138" rx="20" fill="${INK}"/>
-  <rect x="14" y="10" width="212" height="138" rx="20" fill="url(#body)" stroke="${INK}" stroke-width="6"/>
-  <rect x="17" y="13" width="206" height="24" rx="12" fill="${tier.rim}" fill-opacity="0.85"/>
-  <rect x="30" y="46" width="180" height="9" rx="4.5" fill="#fff" fill-opacity="0.3"/>
-  <rect x="17" y="116" width="206" height="29" rx="14" fill="#000" fill-opacity="0.13"/>
-  ${[40, 174]
+  <rect x="14" y="18" width="212" height="140" rx="18" fill="${INK}"/>
+  <rect x="14" y="10" width="212" height="140" rx="18" fill="url(#paint)" stroke="${INK}" stroke-width="6"/>
+  <rect x="17" y="13" width="206" height="134" rx="15" fill="url(#paint-side)"/>
+  <path d="M20 58 H220 M20 100 H220" stroke="${tier.rim}" stroke-opacity="0.55" stroke-width="4"/>
+  <path d="M22 62 H218 M22 104 H218" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>
+  <rect x="9" y="6" width="222" height="24" rx="10" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
+  <rect x="16" y="10" width="208" height="5" rx="2.5" fill="#fff" fill-opacity="0.65"/>
+  <rect x="9" y="128" width="222" height="24" rx="10" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
+  <rect x="16" y="132" width="208" height="5" rx="2.5" fill="#fff" fill-opacity="0.5"/>
+  ${[34, 180]
     .map(
       (x) => `
-    <rect x="${x}" y="8" width="26" height="144" rx="7" fill="url(#gold)" stroke="${INK}" stroke-width="4.5"/>
-    <rect x="${x + 5}" y="14" width="6" height="128" rx="3" fill="#fff" fill-opacity="0.55"/>
-    <circle cx="${x + 13}" cy="${36}" r="4" fill="${GOLD.deep}"/>
-    <circle cx="${x + 13}" cy="${126}" r="4" fill="${GOLD.deep}"/>`,
+    <rect x="${x}" y="4" width="26" height="150" rx="6" fill="url(#metalH)" stroke="${INK}" stroke-width="4.5"/>
+    <rect x="${x + 4}" y="10" width="5" height="138" rx="2.5" fill="#fff" fill-opacity="0.55"/>
+    ${rivet(x + 13, 46, tier)}${rivet(x + 13, 80, tier)}${rivet(x + 13, 114, tier)}`,
     )
     .join('')}
-  <path d="M14 128 L14 138 Q14 148 26 148 L44 148 L44 128 Z" fill="url(#gold)" stroke="${INK}" stroke-width="4"/>
-  <path d="M226 128 L226 138 Q226 148 214 148 L196 148 L196 128 Z" fill="url(#gold)" stroke="${INK}" stroke-width="4"/>
-  <rect x="94" y="26" width="52" height="60" rx="12" fill="url(#goldH)" stroke="${INK}" stroke-width="5"/>
-  <rect x="100" y="32" width="40" height="10" rx="5" fill="#fff" fill-opacity="0.6"/>
-  <circle cx="120" cy="54" r="8" fill="${INK}"/>
-  <path d="M115 56 L125 56 L122 74 L118 74 Z" fill="${INK}"/>`);
+  <path d="M92 24 H148 V66 Q148 88 120 96 Q92 88 92 66 Z" fill="${INK}" transform="translate(0 4)"/>
+  <path d="M92 24 H148 V66 Q148 88 120 96 Q92 88 92 66 Z" fill="url(#metalH)" stroke="${INK}" stroke-width="5"/>
+  <path d="M99 30 H141 V38 H99 Z" fill="#fff" fill-opacity="0.55"/>
+  <circle cx="120" cy="56" r="9" fill="${INK}"/>
+  <path d="M114.5 58 H125.5 L123 78 H117 Z" fill="${INK}"/>`);
 
-export const chestLidClosed = (tier: TierColors) =>
-  svg(CHEST.width, CHEST.lidHeight, `
+/** Domed lid, closed. */
+export const chestLidClosed = (tier: TierColors) => {
+  const dome = 'M12 112 V66 Q12 12 120 10 Q228 12 228 66 V112 Z';
+  return svg(CHEST.width, CHEST.lidHeight, `
   <defs>
-    <linearGradient id="lid" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${tier.lidLight}"/>
-      <stop offset="0.45" stop-color="${tier.lidBase}"/>
-      <stop offset="1" stop-color="${tier.lidDark}"/>
-    </linearGradient>
-    ${goldGradient('gold')}
-    <clipPath id="dome"><path d="M14 112 L14 64 Q14 14 120 14 Q226 14 226 64 L226 112 Z"/></clipPath>
+    ${paintGradient('paint', tier)}
+    ${metalGradient('metal', tier)}
+    ${metalGradient('metalH', tier, false)}
+    <clipPath id="dome"><path d="${dome}"/></clipPath>
+    <radialGradient id="gem" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#fff"/>
+      <stop offset="0.35" stop-color="${tier.gem}"/>
+      <stop offset="1" stop-color="${tier.dark}"/>
+    </radialGradient>
   </defs>
-  <path d="M14 114 L14 66 Q14 18 120 18 Q226 18 226 66 L226 114 Z" fill="${INK}"/>
-  <path d="M14 110 L14 62 Q14 12 120 12 Q226 12 226 62 L226 110 Z" fill="url(#lid)" stroke="${INK}" stroke-width="6"/>
+  <path d="${dome}" fill="${INK}" transform="translate(0 5)"/>
+  <path d="${dome}" fill="url(#paint)"/>
   <g clip-path="url(#dome)">
-    <rect x="0" y="88" width="240" height="30" fill="${tier.rim}" fill-opacity="0.45"/>
-    <rect x="40" y="0" width="26" height="120" fill="url(#gold)" stroke="${INK}" stroke-width="4.5"/>
-    <rect x="174" y="0" width="26" height="120" fill="url(#gold)" stroke="${INK}" stroke-width="4.5"/>
-    <rect x="45" y="10" width="6" height="100" rx="3" fill="#fff" fill-opacity="0.55"/>
-    <rect x="179" y="10" width="6" height="100" rx="3" fill="#fff" fill-opacity="0.55"/>
+    <rect x="0" y="0" width="240" height="120" fill="url(#paint-side)"/>
+    <path d="M8 60 Q120 30 232 60" fill="none" stroke="${tier.rim}" stroke-opacity="0.55" stroke-width="4"/>
+    <path d="M8 65 Q120 35 232 65" fill="none" stroke="#fff" stroke-opacity="0.16" stroke-width="3"/>
+    <rect x="34" y="0" width="26" height="120" fill="url(#metalH)" stroke="${INK}" stroke-width="4.5"/>
+    <rect x="180" y="0" width="26" height="120" fill="url(#metalH)" stroke="${INK}" stroke-width="4.5"/>
+    <rect x="38" y="0" width="5" height="120" fill="#fff" fill-opacity="0.5"/>
+    <rect x="184" y="0" width="5" height="120" fill="#fff" fill-opacity="0.5"/>
+    ${rivet(47, 40, tier)}${rivet(193, 40, tier)}${rivet(47, 72, tier)}${rivet(193, 72, tier)}
   </g>
-  <path d="M14 110 L14 62 Q14 12 120 12 Q226 12 226 62 L226 110 Z" fill="none" stroke="${INK}" stroke-width="6"/>
-  <path d="M34 50 Q120 18 206 50" fill="none" stroke="#fff" stroke-opacity="0.45" stroke-width="9" stroke-linecap="round"/>
-  <rect x="98" y="84" width="44" height="32" rx="9" fill="url(#gold)" stroke="${INK}" stroke-width="5"/>
-  <rect x="104" y="89" width="30" height="6" rx="3" fill="#fff" fill-opacity="0.6"/>`);
+  <path d="${dome}" fill="none" stroke="${INK}" stroke-width="6"/>
+  <path d="M70 30 Q120 16 170 30" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="7" stroke-linecap="round"/>
+  <rect x="7" y="90" width="226" height="24" rx="10" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
+  <rect x="14" y="94" width="212" height="5" rx="2.5" fill="#fff" fill-opacity="0.6"/>
+  <path d="M120 14 L136 32 L120 52 L104 32 Z" fill="${INK}" transform="translate(0 3)"/>
+  <path d="M120 14 L136 32 L120 52 L104 32 Z" fill="url(#gem)" stroke="${INK}" stroke-width="4"/>
+  <path d="M120 18 L128 32 L120 32 Z" fill="#fff" fill-opacity="0.7"/>
+  <rect x="104" y="82" width="32" height="36" rx="8" fill="url(#metalH)" stroke="${INK}" stroke-width="5"/>
+  <rect x="115" y="96" width="10" height="14" rx="4" fill="${INK}"/>`);
+};
 
+/** The lid swung back: we see its inner face above the body. */
 export const chestLidOpen = (tier: TierColors) =>
   svg(CHEST.width, CHEST.lidHeight, `
   <defs>
-    <linearGradient id="inner" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="${tier.rim}"/>
-      <stop offset="1" stop-color="${tier.dark}"/>
+    ${metalGradient('metal', tier)}
+    ${metalGradient('metalH', tier, false)}
+    <linearGradient id="inside" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${tier.dark}"/>
+      <stop offset="1" stop-color="${tier.rim}"/>
     </linearGradient>
-    <linearGradient id="glow" x1="0" y1="1" x2="0" y2="0">
-      <stop offset="0" stop-color="${GOLD.light}" stop-opacity="0.95"/>
-      <stop offset="1" stop-color="${GOLD.light}" stop-opacity="0"/>
+    <linearGradient id="shine" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="${GOLD.light}" stop-opacity="0.9"/>
+      <stop offset="0.7" stop-color="${GOLD.light}" stop-opacity="0"/>
     </linearGradient>
-    ${goldGradient('gold')}
   </defs>
-  <path d="M14 112 L22 30 Q26 8 120 8 Q214 8 218 30 L226 112 Z" fill="${INK}"/>
-  <path d="M18 108 L26 32 Q30 14 120 14 Q210 14 214 32 L222 108 Z" fill="${tier.lidBase}" stroke="${INK}" stroke-width="6"/>
-  <path d="M36 102 L42 40 Q46 28 120 28 Q194 28 198 40 L204 102 Z" fill="url(#inner)"/>
-  <path d="M36 102 L42 40 Q46 28 120 28 Q194 28 198 40 L204 102 Z" fill="url(#glow)"/>
-  <rect x="42" y="12" width="22" height="96" fill="url(#gold)" stroke="${INK}" stroke-width="4"/>
-  <rect x="176" y="12" width="22" height="96" fill="url(#gold)" stroke="${INK}" stroke-width="4"/>
-  <rect x="14" y="98" width="212" height="16" rx="8" fill="url(#gold)" stroke="${INK}" stroke-width="5"/>`);
+  <path d="M18 116 L6 26 Q8 6 120 4 Q232 6 234 26 L222 116 Z" fill="${INK}"/>
+  <path d="M22 112 L12 28 Q14 12 120 10 Q226 12 228 28 L218 112 Z" fill="${tier.base}" stroke="${INK}" stroke-width="5"/>
+  <path d="M38 108 L30 36 Q32 26 120 24 Q208 26 210 36 L202 108 Z" fill="url(#inside)"/>
+  <path d="M34 74 Q120 60 206 74" fill="none" stroke="#000" stroke-opacity="0.2" stroke-width="4"/>
+  <path d="M38 108 L30 36 Q32 26 120 24 Q208 26 210 36 L202 108 Z" fill="url(#shine)"/>
+  <path d="M42 110 L34 12 H58 L64 110 Z" fill="url(#metalH)" stroke="${INK}" stroke-width="4"/>
+  <path d="M198 110 L206 12 H182 L176 110 Z" fill="url(#metalH)" stroke="${INK}" stroke-width="4"/>
+  <rect x="12" y="98" width="216" height="20" rx="8" fill="url(#metal)" stroke="${INK}" stroke-width="5"/>
+  <rect x="18" y="101" width="204" height="4" rx="2" fill="#fff" fill-opacity="0.6"/>`);
 
-/** Treasure spilling from an open chest; sits on the body rim. */
+/** Treasure heaped in the open chest; the body's top band hides its base. */
 export const chestTreasure = () => {
-  const coins = [
-    [62, 70, 0], [88, 62, -10], [116, 56, 8], [146, 60, -6], [172, 68, 12], [100, 76, 4], [134, 74, -12], [78, 82, 6], [158, 82, -4],
-  ]
-    .map(
-      ([x, y, r]) => `
-    <g transform="rotate(${r} ${x} ${y})">
-      <ellipse cx="${x}" cy="${y + 3}" rx="15" ry="8" fill="${GOLD.deep}"/>
-      <ellipse cx="${x}" cy="${y}" rx="15" ry="8" fill="url(#coin)" stroke="${INK}" stroke-width="2.5"/>
-      <ellipse cx="${x - 3}" cy="${y - 2}" rx="6" ry="2.5" fill="#fff" fill-opacity="0.7"/>
-    </g>`,
-    )
+  const rows: Array<[number, number, number]> = [
+    // y, first x, count
+    [112, 30, 9],
+    [100, 42, 8],
+    [88, 54, 7],
+    [76, 66, 6],
+    [64, 80, 5],
+    [53, 96, 3],
+  ];
+  let seed = 7;
+  const jitter = () => ((seed = (seed * 9301 + 49297) % 233280) / 233280 - 0.5);
+  const coin = (x: number, y: number) => {
+    const r = jitter() * 24;
+    return `
+    <g transform="rotate(${r.toFixed(1)} ${x} ${y})">
+      <ellipse cx="${x}" cy="${y + 3.5}" rx="14" ry="7" fill="${GOLD.deep}" stroke="${INK}" stroke-width="2.5"/>
+      <ellipse cx="${x}" cy="${y}" rx="14" ry="7" fill="url(#coin)" stroke="${INK}" stroke-width="2.5"/>
+      <ellipse cx="${x}" cy="${y}" rx="8" ry="3.6" fill="none" stroke="${GOLD.dark}" stroke-width="1.6"/>
+      <ellipse cx="${x - 4}" cy="${y - 2}" rx="4" ry="1.6" fill="#fff" fill-opacity="0.85"/>
+    </g>`;
+  };
+  const coins = rows
+    .map(([y, x0, count]) => Array.from({ length: count }, (_, i) => coin(x0 + i * 22 + jitter() * 6, y + jitter() * 4)).join(''))
     .join('');
-  return svg(240, 110, `
+  const gem = (x: number, y: number, size: number, fill: string, id: string) => `
+    <radialGradient id="${id}" cx="0.35" cy="0.3" r="0.8"><stop offset="0" stop-color="#fff"/><stop offset="0.4" stop-color="${fill}"/><stop offset="1" stop-color="${INK}" stop-opacity="0.6"/></radialGradient>
+    <path d="M${x} ${y - size} L${x + size * 0.8} ${y - size * 0.25} L${x} ${y + size} L${x - size * 0.8} ${y - size * 0.25} Z" fill="url(#${id})" stroke="${INK}" stroke-width="3"/>
+    <path d="M${x - size * 0.8} ${y - size * 0.25} H${x + size * 0.8} M${x} ${y - size} L${x - size * 0.3} ${y - size * 0.25} L${x} ${y + size} L${x + size * 0.3} ${y - size * 0.25} Z" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="1.6"/>`;
+  const glint = (x: number, y: number, s: number) =>
+    `<path d="M${x} ${y - s} Q${x} ${y} ${x + s} ${y} Q${x} ${y} ${x} ${y + s} Q${x} ${y} ${x - s} ${y} Q${x} ${y} ${x} ${y - s} Z" fill="#fff"/>`;
+  return svg(CHEST.width, CHEST.treasureHeight, `
   <defs>
-    <radialGradient id="light" cx="0.5" cy="0.75" r="0.6">
-      <stop offset="0" stop-color="#fffbe0" stop-opacity="1"/>
-      <stop offset="0.5" stop-color="${GOLD.base}" stop-opacity="0.65"/>
+    <radialGradient id="light" cx="0.5" cy="0.8" r="0.6">
+      <stop offset="0" stop-color="#fffbe0" stop-opacity="0.95"/>
+      <stop offset="0.55" stop-color="${GOLD.base}" stop-opacity="0.5"/>
       <stop offset="1" stop-color="${GOLD.base}" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="coin" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="${GOLD.light}"/>
+      <stop offset="0.6" stop-color="${GOLD.base}"/>
       <stop offset="1" stop-color="${GOLD.dark}"/>
     </linearGradient>
-    <linearGradient id="gem" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#ffd1f0"/>
-      <stop offset="1" stop-color="#e0339c"/>
-    </linearGradient>
   </defs>
-  <ellipse cx="120" cy="84" rx="118" ry="50" fill="url(#light)"/>
+  <ellipse cx="120" cy="84" rx="120" ry="48" fill="url(#light)"/>
+  <ellipse cx="120" cy="118" rx="106" ry="12" fill="#1b0d2a"/>
   ${coins}
-  <path d="M120 40 L134 54 L120 76 L106 54 Z" fill="url(#gem)" stroke="${INK}" stroke-width="3"/>
-  <path d="M120 40 L126 54 L120 76" fill="#fff" fill-opacity="0.35"/>`);
+  ${gem(120, 34, 17, '#ff5fa2', 'g1')}
+  ${gem(70, 84, 10, '#6fd2ff', 'g2')}
+  ${gem(170, 80, 11, '#8ff5a0', 'g3')}
+  ${glint(92, 50, 7)}${glint(156, 44, 9)}${glint(196, 92, 6)}${glint(46, 96, 5)}`);
 };
 
 // ---- badge (loss / draw) ------------------------------------------------------------

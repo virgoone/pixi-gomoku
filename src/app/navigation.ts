@@ -18,6 +18,22 @@ export interface AppPopup extends Container {
   update?(ticker: Ticker): void;
 }
 
+/**
+ * Kill every GSAP tween aimed at `root` or anything inside it. Pixi nulls a
+ * container's position/scale on destroy, so a tween that outlives its target
+ * would throw on the next tick.
+ */
+export function killTweensDeep(root: Container) {
+  const visit = (node: Container) => {
+    gsap.killTweensOf(node);
+    gsap.killTweensOf(node.scale);
+    gsap.killTweensOf(node.position);
+    gsap.killTweensOf(node.pivot);
+    for (const child of node.children) visit(child);
+  };
+  visit(root);
+}
+
 class Navigation {
   readonly root = new Container();
   private screenLayer = new Container();
@@ -34,7 +50,17 @@ class Navigation {
     this.root.addChild(this.screenLayer, this.dim, this.popupLayer);
   }
 
-  async goTo(next: AppScreen) {
+  /** Screen swaps run one at a time so overlapping calls never stack two screens. */
+  private transition: Promise<void> = Promise.resolve();
+
+  goTo(next: AppScreen): Promise<void> {
+    const swap = this.transition.then(() => this.swap(next));
+    this.transition = swap.catch(() => undefined);
+    // `show` runs outside the queue: a screen left mid-intro must not block the next swap.
+    return swap.then(() => (next.destroyed ? undefined : next.show?.()));
+  }
+
+  private async swap(next: AppScreen) {
     await this.dismissPopup();
     const previous = this.screen;
     if (previous) {
@@ -42,12 +68,14 @@ class Navigation {
       await previous.hide?.();
       previous.onLeave?.();
       this.screenLayer.removeChild(previous);
+      killTweensDeep(previous);
       previous.destroy({ children: true });
     }
     this.screen = next;
     this.screenLayer.addChild(next);
     next.resize?.(this.width, this.height);
-    await next.show?.();
+    // A popup opened while the old screen was fading out belongs to that screen.
+    await this.dismissPopup();
   }
 
   async present(popup: AppPopup) {
@@ -69,6 +97,7 @@ class Navigation {
     gsap.to(this.dim, { alpha: 0, duration: 0.2, onComplete: () => void (this.dim.visible = false) });
     await popup.hide?.();
     this.popupLayer.removeChild(popup);
+    killTweensDeep(popup);
     popup.destroy({ children: true });
     if (this.screen) this.screen.interactiveChildren = true;
   }

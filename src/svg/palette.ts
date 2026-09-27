@@ -4,6 +4,8 @@ export const INK = '#2a1638';
 
 export const GOLD = { light: '#fff3b0', base: '#ffd23f', dark: '#e0930f', deep: '#a8620a' };
 
+export const SILVER = { light: '#ffffff', base: '#d3dcea', dark: '#8795ad', deep: '#56637a' };
+
 export type TierId = 0 | 1 | 2 | 3;
 
 export type TierColors = {
@@ -17,6 +19,10 @@ export type TierColors = {
   lidLight: string;
   lidBase: string;
   lidDark: string;
+  /** Bands, straps and lock: silver for the lower tiers, gold above. */
+  metal: 'silver' | 'gold';
+  /** Stud on the lid. */
+  gem: string;
   /** Background glow for the result screen. */
   bgInner: string;
   bgOuter: string;
@@ -27,25 +33,25 @@ export const TIERS: Record<TierId, TierColors> = {
   0: {
     name: '普通宝箱',
     light: '#8ff5c8', base: '#39d98f', dark: '#169a5f', rim: '#0d6b41',
-    lidLight: '#8ff5c8', lidBase: '#39d98f', lidDark: '#169a5f',
+    lidLight: '#8ff5c8', lidBase: '#39d98f', lidDark: '#169a5f', metal: 'silver', gem: '#8ff5c8',
     bgInner: '#1f7a74', bgOuter: '#0b2b33', glow: 0x6ff5c0,
   },
   1: {
     name: '稀有宝箱',
     light: '#9ad0ff', base: '#3b9cff', dark: '#1c5fd0', rim: '#123f96',
-    lidLight: '#9ad0ff', lidBase: '#3b9cff', lidDark: '#1c5fd0',
+    lidLight: '#9ad0ff', lidBase: '#3b9cff', lidDark: '#1c5fd0', metal: 'silver', gem: '#6fd2ff',
     bgInner: '#2360c9', bgOuter: '#0b1740', glow: 0x7cc4ff,
   },
   2: {
     name: '史诗宝箱',
     light: '#dfb3ff', base: '#b35cff', dark: '#7a2fd6', rim: '#521c9e',
-    lidLight: '#dfb3ff', lidBase: '#b35cff', lidDark: '#7a2fd6',
+    lidLight: '#dfb3ff', lidBase: '#b35cff', lidDark: '#7a2fd6', metal: 'gold', gem: '#ff5fa2',
     bgInner: '#6a2bc4', bgOuter: '#1b0b3d', glow: 0xd09bff,
   },
   3: {
     name: '传说宝箱',
     light: '#ffb1d3', base: '#ff5fa2', dark: '#d8337c', rim: '#9c1c57',
-    lidLight: GOLD.light, lidBase: GOLD.base, lidDark: GOLD.dark,
+    lidLight: '#ffb1d3', lidBase: '#ff5fa2', lidDark: '#d8337c', metal: 'gold', gem: '#6fe7ff',
     bgInner: '#d8741f', bgOuter: '#3a1206', glow: 0xffd66b,
   },
 };

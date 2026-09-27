@@ -5,12 +5,12 @@ import { getProfile, onProfileChange } from '../app/storage';
 import { tex } from '../app/textures';
 import { label } from './Label';
 
-type Currency = 'coins' | 'gems' | 'crowns';
+export type Currency = 'coins' | 'gems' | 'crowns';
 const ICON: Record<Currency, string> = { coins: 'coin', gems: 'gem', crowns: 'crown' };
 
 /** Top-right currency counters, as in the reference result screen. */
 export class Hud extends Container {
-  private values = new Map<Currency, { text: Text; value: { v: number }; icon: Sprite }>();
+  private values = new Map<Currency, { text: Text; value: { v: number }; icon: Sprite; baseScale: number }>();
   private unsubscribe: () => void;
 
   constructor() {
@@ -33,11 +33,15 @@ export class Hud extends Container {
       item.x = x;
       x += 124;
       this.addChild(item);
-      this.values.set(currency, { text, value: { v: profile[currency] }, icon });
+      this.values.set(currency, { text, value: { v: profile[currency] }, icon, baseScale: icon.scale.x });
     }
     this.unsubscribe = onProfileChange((next) => {
       for (const currency of ['coins', 'gems', 'crowns'] as Currency[]) this.animateTo(currency, next[currency]);
     });
+  }
+
+  get totalHeight() {
+    return 40;
   }
 
   get totalWidth() {
@@ -50,6 +54,18 @@ export class Hud extends Container {
     return entry ? entry.icon.getGlobalPosition() : this.getGlobalPosition();
   }
 
+  /** Bump a counter by `amount` for a landing reward, ahead of the profile update. */
+  bump(currency: Currency, amount: number) {
+    const entry = this.values.get(currency);
+    if (!entry) return;
+    gsap.killTweensOf(entry.value);
+    entry.value.v = Math.round(entry.value.v + amount);
+    entry.text.text = String(entry.value.v);
+    gsap.killTweensOf(entry.icon.scale);
+    const base = entry.baseScale;
+    gsap.fromTo(entry.icon.scale, { x: base * 1.35, y: base * 1.35 }, { x: base, y: base, duration: 0.25, ease: 'back.out(3)' });
+  }
+
   private animateTo(currency: Currency, target: number) {
     const entry = this.values.get(currency);
     if (!entry || entry.value.v === target) return;
@@ -59,11 +75,18 @@ export class Hud extends Container {
       ease: 'power2.out',
       onUpdate: () => void (entry.text.text = String(Math.round(entry.value.v))),
     });
-    gsap.fromTo(entry.icon.scale, { x: entry.icon.scale.x * 1.4, y: entry.icon.scale.y * 1.4 }, { x: entry.icon.scale.x, y: entry.icon.scale.y, duration: 0.4, ease: 'back.out(3)' });
+    const base = entry.baseScale;
+    gsap.killTweensOf(entry.icon.scale);
+    gsap.fromTo(entry.icon.scale, { x: base * 1.4, y: base * 1.4 }, { x: base, y: base, duration: 0.4, ease: 'back.out(3)' });
   }
 
   override destroy(options?: Parameters<Container['destroy']>[0]) {
     this.unsubscribe();
+    // The count-up tween writes into a Text that is about to be destroyed.
+    for (const entry of this.values.values()) {
+      gsap.killTweensOf(entry.value);
+      gsap.killTweensOf(entry.icon.scale);
+    }
     super.destroy(options);
   }
 }
