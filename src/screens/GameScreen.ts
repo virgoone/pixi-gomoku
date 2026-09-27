@@ -69,10 +69,13 @@ export class GameScreen extends Container {
   private picking: Point[] = [];
   /** The seats as the game started, before any opening swap: what "play again" reuses. */
   private startConfig: GameConfig;
+  /** The local player's stone when the game started (null on one device): under RIF, who placed the opening. */
+  private readonly startStone: Stone | null;
 
   constructor(private config: GameConfig) {
     super();
     this.startConfig = config;
+    this.startStone = config.mode === 'ai' ? config.humanStone : config.mode === 'online' ? config.myStone : null;
     // Dev only: lets browser tests read the game state and act as the player.
     if (import.meta.env.DEV) (window as unknown as { __gomokuScreen?: GameScreen }).__gomokuScreen = this;
     const variant = normalizeVariant(config.rule ?? 'freestyle', config.opening);
@@ -450,7 +453,7 @@ export class GameScreen extends Container {
     if (this.ended) return;
     this.board.hideGhost();
     const config = this.config;
-    const who = config.mode === 'local' ? `${stoneName(this.game.turn)}认输？` : '确定要认输吗？';
+    const who = config.mode === 'local' ? `${stoneName(this.actorStone())}认输？` : '确定要认输吗？';
     void navigation.present(
       new ConfirmPopup({
         title: '认输',
@@ -601,7 +604,10 @@ export class GameScreen extends Container {
     const config = this.config;
     if (this.ended || this.opponentGone || config.mode === 'local') return false;
     const me = config.mode === 'ai' ? config.humanStone : config.myStone;
-    return this.game.movesBy(me) > 0;
+    if (this.opening !== 'rif') return this.game.movesBy(me) > 0;
+    // Under RIF the opening's three stones (both colours) are all the tentative black's.
+    if (this.startStone === BLACK && this.game.history.length > 0) return true;
+    return this.game.history.some((move, index) => index >= 3 && move.stone === me);
   }
 
   private openMenu() {
@@ -610,7 +616,8 @@ export class GameScreen extends Container {
     void navigation.present(
       new PausePopup({
         note: this.abandonCostsStreak && getProfile().streak > 0 ? `中途离开会中断 ${getProfile().streak} 连胜` : undefined,
-        onRestart: config.mode === 'online' ? undefined : () => void navigation.goTo(new GameScreen(config)),
+        // Restart with the seats the game started with, before any opening swap.
+        onRestart: config.mode === 'online' ? undefined : () => void navigation.goTo(new GameScreen(this.startConfig)),
         onHome: () => {
           if (config.mode === 'online') config.link.close();
           void navigation.goTo(new HomeScreen());

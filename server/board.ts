@@ -15,6 +15,8 @@ import type { KV } from './kv';
 
 export const TOP_SIZE = 50;
 export const SUBMIT_INTERVAL_MS = 8000;
+/** A resigned game counts only after this many moves. */
+export const MIN_RESIGN_MOVES = 5;
 
 export type Player = {
   userId: string;
@@ -96,8 +98,10 @@ export function judge(game: GameSubmission): 'win' | 'loss' | 'draw' {
     return replay.winner === game.myStone ? 'win' : 'loss';
   }
   if (game.resigned) {
-    // Needs at least one move from each side so an instant resign farm earns nothing.
-    if (replay.movesBy(BLACK) < 1 || replay.movesBy(WHITE) < 1) throw new BoardError(422, 'too_short', '对局太短，不计入排行');
+    // Both players must have acted, so an instant resign farm earns nothing. Colours are not
+    // enough: under the RIF opening one player places the first three stones (both colours)
+    // and, after a swap, the 4th too. By move 5 the other side has always played.
+    if (replay.history.length < MIN_RESIGN_MOVES) throw new BoardError(422, 'too_short', '对局太短，不计入排行');
     return opponent(game.resigned) === game.myStone ? 'win' : 'loss';
   }
   throw new BoardError(422, 'unfinished', '对局还没有结束');
