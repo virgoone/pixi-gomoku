@@ -1,6 +1,7 @@
 import { BRAINS, type BrainId } from '../src/gomoku/ai/brains';
 import { BLACK, BOARD_SIZE, GomokuGame, opponent, type Stone, WHITE } from '../src/gomoku/rules';
 import { ladderPoints } from '../src/result/ladder';
+import type { CloudProgress } from '../src/profile/progress';
 import type { User } from './auth';
 import type { KV } from './kv';
 
@@ -26,6 +27,8 @@ export type Player = {
   bestStreak: number;
   updatedAt: number;
   lastSubmitAt: number;
+  /** Keep periodic save synchronization from undoing an admin removal. */
+  removed?: boolean;
   /** Recorded atomically with totals: retries and other devices cannot double-credit a game. */
   games?: Record<string, { result: 'win' | 'loss' | 'draw'; points: number; finishedAt: number }>;
 };
@@ -100,7 +103,7 @@ export function judge(game: GameSubmission): 'win' | 'loss' | 'draw' {
   throw new BoardError(422, 'unfinished', '对局还没有结束');
 }
 
-const emptyPlayer = (user: User, now: number): Player => ({
+const emptyPlayer = (user: Pick<User, 'id' | 'name'>, now: number): Player => ({
   userId: user.id,
   name: user.name,
   points: 0,
@@ -115,6 +118,26 @@ const emptyPlayer = (user: User, now: number): Player => ({
 
 const toEntry = (p: Player): BoardEntry => ({ userId: p.userId, name: p.name, points: p.points, wins: p.wins, losses: p.losses, draws: p.draws, bestStreak: p.bestStreak });
 
+async function accountProgress(kv: KV, userId: string) {
+  return (await kv.get<{ profile: CloudProgress }>(`profiles/${userId}`))?.value.profile;
+}
+
+/** The save already includes replayed games. Overlay totals; never add them to
+ * verified results. Keep verified counts as a floor for older/offline clients
+ * whose save upload has not arrived yet. Points still come only from replays. */
+async function withAccountProgress(kv: KV, player: Player): Promise<Player> {
+  const progress = await accountProgress(kv, player.userId);
+  if (!progress) return player;
+  return {
+    ...player,
+    wins: Math.max(player.wins, progress.wins),
+    losses: Math.max(player.losses, progress.losses),
+    draws: Math.max(player.draws, progress.draws),
+    bestStreak: Math.max(player.bestStreak, progress.bestStreak),
+    streak: progress.streak,
+  };
+}
+
 function rankEntries(entries: BoardEntry[]) {
   return entries.sort((a, b) => b.points - a.points || b.wins - a.wins || a.losses - b.losses || a.name.localeCompare(b.name)).slice(0, TOP_SIZE);
 }
@@ -128,7 +151,9 @@ async function updateBoard(kv: KV, change: (entries: BoardEntry[]) => BoardEntry
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const current = await kv.get<Board>('board');
     const board = current?.value ?? { version: 0, updatedAt: 0, entries: [] };
-    const next: Board = { version: board.version + 1, updatedAt: now, entries: rankEntries(await change(board.entries.map((e) => ({ ...e })))) };
+    const entries = rankEntries(await change(board.entries.map((e) => ({ ...e }))));
+    if (JSON.stringify(entries) === JSON.stringify(board.entries)) return board;
+    const next: Board = { version: board.version + 1, updatedAt: now, entries };
     const written = current ? await kv.set('board', next, { onlyIfMatch: current.etag }) : await kv.set('board', next, { onlyIfNew: true });
     if (written) return next;
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 60 * (attempt + 1)));
@@ -144,11 +169,11 @@ function rankOf(board: Board, userId: string) {
 export async function getPlayer(kv: KV, user: User) {
   const player = (await kv.get<Player>(`players/${user.id}`))?.value ?? null;
   const board = await readBoard(kv);
-  return { player: player ? publicPlayer(player) : null, rank: rankOf(board, user.id) };
+  return { player: player && !player.removed ? publicPlayer(await withAccountProgress(kv, player)) : null, rank: rankOf(board, user.id) };
 }
 
 function publicPlayer(player: Player) {
-  const { games: _games, ...stats } = player;
+  const { games: _games, removed: _removed, ...stats } = player;
   return stats;
 }
 
@@ -156,8 +181,18 @@ function publishPlayer(kv: KV, userId: string, now: number) {
   return updateBoard(kv, async (entries) => {
     const latest = (await kv.get<Player>(`players/${userId}`))?.value;
     const others = entries.filter((entry) => entry.userId !== userId);
-    return latest ? [...others, toEntry(latest)] : others;
+    return latest && !latest.removed ? [...others, toEntry(await withAccountProgress(kv, latest))] : others;
   }, now);
+}
+
+/** Also runs on an empty save pull / board visit, so already-imported saves
+ * become visible without reimporting or requiring another completed game. */
+export async function syncPlayerProgress(kv: KV, user: User, now = Date.now()) {
+  const progress = await accountProgress(kv, user.id);
+  if (progress && progress.wins + progress.losses + progress.draws > 0) {
+    await kv.set(`players/${user.id}`, emptyPlayer(user, now), { onlyIfNew: true });
+  }
+  return publishPlayer(kv, user.id, now);
 }
 
 function streaks(games: NonNullable<Player['games']>) {
@@ -186,7 +221,7 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
       // Also repairs the public board if a previous request saved the player
       // but lost its connection before publishing the board or returning a reply.
       const board = await publishPlayer(kv, user.id, now);
-      return { result: receipt.result, points: receipt.points, duplicate: true, player: publicPlayer(player), rank: rankOf(board, user.id), version: board.version };
+      return { result: receipt.result, points: receipt.points, duplicate: true, player: publicPlayer(await withAccountProgress(kv, player)), rank: rankOf(board, user.id), version: board.version };
     }
     if (now - player.lastSubmitAt < SUBMIT_INTERVAL_MS) throw new BoardError(429, 'too_fast', '提交太频繁，稍后再试');
     const points = ladderPoints(result, game.mode, game.brain);
@@ -204,11 +239,12 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
       games,
       updatedAt: now,
       lastSubmitAt: now,
+      removed: false,
     };
     const written = current ? await kv.set(key, next, { onlyIfMatch: current.etag }) : await kv.set(key, next, { onlyIfNew: true });
     if (!written) continue;
     const board = await publishPlayer(kv, user.id, now);
-    return { result, points, duplicate: false, player: publicPlayer(next), rank: rankOf(board, user.id), version: board.version };
+    return { result, points, duplicate: false, player: publicPlayer(await withAccountProgress(kv, next)), rank: rankOf(board, user.id), version: board.version };
   }
   throw new BoardError(503, 'busy', '请稍后再试');
 }
@@ -229,6 +265,12 @@ export async function renamePlayer(kv: KV, user: User, now = Date.now()) {
 
 /** Admin: take a player off the board and reset their record. */
 export async function removePlayer(kv: KV, userId: string, now = Date.now()) {
-  await kv.delete(`players/${userId}`);
-  return await updateBoard(kv, (entries) => entries.filter((e) => e.userId !== userId), now);
+  const key = `players/${userId}`;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const current = await kv.get<Player>(key);
+    const user = { id: userId, name: current?.value.name ?? '' };
+    const next = { ...emptyPlayer(user, now), removed: true };
+    if (await kv.set(key, next, current ? { onlyIfMatch: current.etag } : { onlyIfNew: true })) return publishPlayer(kv, userId, now);
+  }
+  throw new BoardError(503, 'busy', '请稍后再试');
 }

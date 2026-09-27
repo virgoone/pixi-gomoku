@@ -11,7 +11,7 @@ import {
   userForToken,
   verifyOtp,
 } from './auth';
-import { BoardError, getPlayer, readBoard, removePlayer, renamePlayer, submitGame } from './board';
+import { BoardError, getPlayer, removePlayer, renamePlayer, submitGame, syncPlayerProgress } from './board';
 import type { KV } from './kv';
 import { syncProgress } from './profile';
 
@@ -85,10 +85,11 @@ export async function handleApi(request: Request, env: ApiEnv): Promise<Response
     }
 
     if (path === '/api/leaderboard' && method === 'GET') {
-      if (!(await currentUser())) return fail(401, 'unauthorized', '登录后查看排行榜');
-      const board = await readBoard(env.board);
+      const user = await currentUser();
+      if (!user) return fail(401, 'unauthorized', '登录后查看排行榜');
+      const board = await syncPlayerProgress(env.board, user, env.now?.() ?? Date.now());
       const etag = `"v${board.version}"`;
-      // Clients poll with If-None-Match; an unchanged board costs one small read and no body.
+      // Unchanged account totals keep the board version and return no body.
       if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers: { etag, 'cache-control': 'no-store' } });
       return json(200, board, { etag });
     }
@@ -113,7 +114,12 @@ export async function handleApi(request: Request, env: ApiEnv): Promise<Response
       let body: Record<string, unknown>;
       try { body = JSON.parse(raw) as Record<string, unknown>; } catch { return fail(400, 'bad_profile', '存档格式不正确'); }
       if (!body || body.userId !== user.id) return fail(409, 'account_changed', '登录账号已切换，请重新登录后同步');
-      return json(200, await syncProgress(env.board, user.id, body, env.now?.() ?? Date.now()));
+      const now = env.now?.() ?? Date.now();
+      const receipt = await syncProgress(env.board, user.id, body, now);
+      // Publish before acknowledging; a lost board write is repaired by retrying
+      // the same events, without adding their counters again.
+      await syncPlayerProgress(env.board, user, now);
+      return json(200, receipt);
     }
 
     if (path === '/api/results' && method === 'POST') {
