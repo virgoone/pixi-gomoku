@@ -137,6 +137,33 @@ function hiss(duration: number, options: { gain?: number; from?: number; to?: nu
   send(b, g, options.reverb ?? 0.3);
 }
 
+/** Decode a compressed clip (e.g. a bundled voice line); null if audio is unavailable. */
+export async function decodeClip(data: ArrayBuffer): Promise<AudioBuffer | null> {
+  const audio = getBus()?.audio;
+  if (!audio) return null;
+  return await audio.decodeAudioData(data);
+}
+
+/** Play a decoded clip through the effects chain (dry, a touch of reverb). Returns a stopper. */
+export function playClip(buffer: AudioBuffer, gain = 1): (() => void) | null {
+  const b = getBus();
+  if (!b) return null;
+  const source = b.audio.createBufferSource();
+  source.buffer = buffer;
+  const g = b.audio.createGain();
+  g.gain.value = gain;
+  source.connect(g);
+  send(b, g, 0.12);
+  source.start();
+  return () => {
+    try {
+      source.stop();
+    } catch {
+      /* already finished */
+    }
+  };
+}
+
 // Notes (Hz).
 const C5 = 523.25;
 const E5 = 659.25;

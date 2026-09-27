@@ -2,7 +2,8 @@ import { Container, Sprite, type Text, type Ticker } from 'pixi.js';
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
-import { speak } from '../app/voice';
+import { say } from '../app/voice';
+import type { VoiceLineId } from '../app/voiceLines';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
@@ -250,7 +251,7 @@ export class GameScreen extends Container {
     else this.status.text = winner === myStone ? '你赢了！' : reason === 'resign' ? '你认输了' : '对手连成五子';
     if (winner !== null && (myStone === null || winner === myStone)) sfx.win();
     else sfx.lose();
-    speak(this.announcement(winner, myStone, reason), { delay: 0.35 });
+    say(this.announcement(winner, myStone, reason), { delay: 0.35 });
 
     const outcome: Outcome = {
       mode: config.mode,
@@ -270,11 +271,15 @@ export class GameScreen extends Container {
   }
 
   /** What the announcer says when the game ends. */
-  private announcement(winner: Stone | null, myStone: Stone | null, reason: Outcome['reason']) {
-    if (winner === null) return '平局，棋逢对手。';
-    if (myStone === null) return reason === 'resign' ? `${stoneName(winner)}赢了，对方认输。` : `五子连珠，${stoneName(winner)}赢了！`;
-    if (winner === myStone) return reason === 'resign' ? '对手认输啦，你赢了！' : '漂亮，你赢了！';
-    return reason === 'resign' ? '没关系，下一局再来。' : '差一点点，再来一局吧。';
+  private announcement(winner: Stone | null, myStone: Stone | null, reason: Outcome['reason']): VoiceLineId {
+    const resigned = reason === 'resign';
+    if (winner === null) return 'draw';
+    if (myStone === null) {
+      if (winner === BLACK) return resigned ? 'blackWinsResign' : 'blackWins';
+      return resigned ? 'whiteWinsResign' : 'whiteWins';
+    }
+    if (winner === myStone) return resigned ? 'winResign' : 'win';
+    return resigned ? 'loseResign' : 'lose';
   }
 
   private replayConfig(): GameConfig {

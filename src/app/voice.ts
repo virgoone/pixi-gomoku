@@ -1,9 +1,12 @@
+import { decodeClip, playClip } from './audio';
 import { getProfile } from './storage';
+import { VOICE_LINES, type VoiceLineId } from './voiceLines';
 
 /**
- * Spoken announcements via the browser's speech synthesis, so no audio files
- * ship with the game. Prefers a Mandarin voice; silently does nothing where
- * speech synthesis is unavailable or the game is muted.
+ * Spoken announcements. The game ships voice clips rendered with Fish Audio
+ * TTS (public/voice/<id>.mp3, see `npm run voice`); when a clip is missing or
+ * cannot be decoded it falls back to the browser's speech synthesis with the
+ * same text. Everything is silent while the game is muted.
  */
 
 const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
@@ -46,6 +49,9 @@ if (synth) {
   };
   window.addEventListener('pointerdown', unlock, { once: true, capture: true });
 }
+if (typeof window !== 'undefined') {
+  window.addEventListener('pointerdown', () => preloadVoice(), { once: true, capture: true });
+}
 
 export function speak(text: string, options: { rate?: number; pitch?: number; delay?: number } = {}) {
   if (!synth || getProfile().muted) return;
@@ -66,6 +72,53 @@ export function speak(text: string, options: { rate?: number; pitch?: number; de
   else say();
 }
 
+// ---- bundled clips ---------------------------------------------------------------------
+
+const clips = new Map<VoiceLineId, Promise<AudioBuffer | null>>();
+let stopClip: (() => void) | null = null;
+/** Bumped by every new line so a slow-loading older line never talks over it. */
+let lineToken = 0;
+
+function loadClip(id: VoiceLineId) {
+  let clip = clips.get(id);
+  if (!clip) {
+    clip = fetch(`${import.meta.env.BASE_URL}voice/${id}.mp3`)
+      .then((response) => {
+        // Dev servers answer unknown paths with the HTML page; only accept audio.
+        const type = response.headers.get('content-type') ?? '';
+        return response.ok && !type.includes('text/html') ? response.arrayBuffer() : null;
+      })
+      .then((data) => (data ? decodeClip(data) : null))
+      .catch(() => null);
+    clips.set(id, clip);
+  }
+  return clip;
+}
+
+/** Fetch and decode every clip ahead of time (after the first tap, when audio may start). */
+export function preloadVoice() {
+  for (const id of Object.keys(VOICE_LINES) as VoiceLineId[]) void loadClip(id);
+}
+
+/** Say one of the game's lines: the bundled clip if there is one, else speech synthesis. */
+export function say(id: VoiceLineId, options: { delay?: number; fallback?: boolean } = {}) {
+  if (getProfile().muted) return;
+  const token = ++lineToken;
+  const run = async () => {
+    const buffer = await loadClip(id);
+    if (token !== lineToken || getProfile().muted) return;
+    stopClip?.();
+    synth?.cancel();
+    if (buffer) stopClip = playClip(buffer, 1.1);
+    else if (options.fallback !== false) speak(VOICE_LINES[id]);
+  };
+  if (options.delay) window.setTimeout(() => void run(), options.delay * 1000);
+  else void run();
+}
+
 export function stopSpeaking() {
+  lineToken += 1;
+  stopClip?.();
+  stopClip = null;
   synth?.cancel();
 }
