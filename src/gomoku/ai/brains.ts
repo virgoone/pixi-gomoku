@@ -1,5 +1,6 @@
-import { type Board, cloneBoard, EMPTY, opponent, type Point, set, type Stone, winningLine } from '../rules';
-import { candidateMoves, evaluatePoint, rankMoves, SCORE } from './patterns';
+import { forbiddenAt } from '../renju';
+import { BLACK, type Board, cloneBoard, EMPTY, opponent, type Point, type Rule, set, sizeOf, type Stone, winningLine } from '../rules';
+import { candidateMoves, evaluatePoint, type RankedMove, rankMoves, SCORE } from './patterns';
 
 export type BrainId = 'sprout' | 'fox' | 'owl';
 
@@ -24,24 +25,40 @@ export function brainInfo(id: BrainId) {
 
 type Random = () => number;
 
+/** Whether `stone` may play at `point` under `rule` (renju forbids some points to black). */
+function legal(board: Board, point: Point, stone: Stone, rule: Rule) {
+  return rule !== 'renju' || stone !== BLACK || forbiddenAt(board, point.x, point.y) === null;
+}
+
+/** The first `count` legal moves of a ranked list, checking only as far as needed. */
+function legalMoves(board: Board, ranked: RankedMove[], stone: Stone, rule: Rule, count = ranked.length) {
+  const moves: RankedMove[] = [];
+  for (const move of ranked) {
+    if (moves.length >= count) break;
+    if (legal(board, move, stone, rule)) moves.push(move);
+  }
+  return moves;
+}
+
 /** Win now if possible, otherwise block the opponent's immediate five. */
-function forcedMove(board: Board, stone: Stone): Point | null {
+function forcedMove(board: Board, stone: Stone, rule: Rule): Point | null {
   const candidates = candidateMoves(board, 1);
   for (const point of candidates) {
-    if (evaluatePoint(board, point.x, point.y, stone).score >= SCORE.FIVE) return point;
+    if (evaluatePoint(board, point.x, point.y, stone).score >= SCORE.FIVE && legal(board, point, stone, rule)) return point;
   }
+  // No need to block a five the opponent is not allowed to play.
   const other = opponent(stone);
   for (const point of candidates) {
-    if (evaluatePoint(board, point.x, point.y, other).score >= SCORE.FIVE) return point;
+    if (evaluatePoint(board, point.x, point.y, other).score >= SCORE.FIVE && legal(board, point, other, rule)) return point;
   }
   return null;
 }
 
 /** Sprout: takes a win and blocks a five, otherwise picks loosely from good moves. */
-function sproutMove(board: Board, stone: Stone, random: Random): Point {
-  const forced = forcedMove(board, stone);
+function sproutMove(board: Board, stone: Stone, random: Random, rule: Rule): Point {
+  const forced = forcedMove(board, stone, rule);
   if (forced) return forced;
-  const ranked = rankMoves(board, stone, 0.55);
+  const ranked = legalMoves(board, rankMoves(board, stone, 0.55), stone, rule, 6);
   // Sometimes it simply does not notice an open four being built.
   const pool = ranked.slice(0, Math.min(6, ranked.length));
   const pick = pool[Math.floor(Math.pow(random(), 1.6) * pool.length)] ?? ranked[0];
@@ -49,10 +66,10 @@ function sproutMove(board: Board, stone: Stone, random: Random): Point {
 }
 
 /** Fox: one-ply greedy on attack + defence with light noise among near-equal moves. */
-function foxMove(board: Board, stone: Stone, random: Random): Point {
-  const forced = forcedMove(board, stone);
+function foxMove(board: Board, stone: Stone, random: Random, rule: Rule): Point {
+  const forced = forcedMove(board, stone, rule);
   if (forced) return forced;
-  const ranked = rankMoves(board, stone, 0.95);
+  const ranked = legalMoves(board, rankMoves(board, stone, 0.95), stone, rule, 3);
   const best = ranked[0];
   const close = ranked.filter((move) => move.score >= best.score * 0.92).slice(0, 3);
   return close[Math.floor(random() * close.length)] ?? best;
@@ -71,8 +88,8 @@ function evaluateBoard(board: Board, stone: Stone) {
 }
 
 /** Owl: alpha-beta over the top candidates, iterative deepening within a time budget. */
-function owlMove(board: Board, stone: Stone, budgetMs = 900): Point {
-  const forced = forcedMove(board, stone);
+function owlMove(board: Board, stone: Stone, rule: Rule, budgetMs = 900): Point {
+  const forced = forcedMove(board, stone, rule);
   if (forced) return forced;
 
   const work = cloneBoard(board);
@@ -86,14 +103,14 @@ function owlMove(board: Board, stone: Stone, budgetMs = 900): Point {
       return evaluateBoard(work, stone);
     }
     if (depth === 0) return evaluateBoard(work, stone);
-    const moves = rankMoves(work, toMove, 1).slice(0, width);
+    const moves = legalMoves(work, rankMoves(work, toMove, 1), toMove, rule, width);
     if (moves.length === 0) return 0;
     const maximizing = toMove === stone;
     let best = maximizing ? -Infinity : Infinity;
     for (const move of moves) {
       set(work, move.x, move.y, toMove);
       let value: number;
-      if (winningLine(work, move.x, move.y, toMove)) {
+      if (winningLine(work, move.x, move.y, toMove, rule)) {
         value = (maximizing ? 1 : -1) * (SCORE.FIVE * 10 + depth);
       } else {
         value = search(depth - 1, opponent(toMove), alpha, beta);
@@ -111,14 +128,14 @@ function owlMove(board: Board, stone: Stone, budgetMs = 900): Point {
     return best;
   }
 
-  const roots = rankMoves(work, stone, 1).slice(0, 12);
+  const roots = legalMoves(work, rankMoves(work, stone, 1), stone, rule, 12);
   let bestMove: Point = roots[0];
   for (let depth = 2; depth <= 5; depth += 1) {
     let depthBest: Point | null = null;
     let depthScore = -Infinity;
     for (const move of roots) {
       set(work, move.x, move.y, stone);
-      const value = winningLine(work, move.x, move.y, stone)
+      const value = winningLine(work, move.x, move.y, stone, rule)
         ? SCORE.FIVE * 100
         : search(depth - 1, opponent(stone), -Infinity, Infinity);
       set(work, move.x, move.y, EMPTY);
@@ -137,7 +154,14 @@ function owlMove(board: Board, stone: Stone, budgetMs = 900): Point {
   return bestMove;
 }
 
-export function chooseMove(id: BrainId, board: Board, stone: Stone, random: Random = Math.random): Point {
-  const move = id === 'sprout' ? sproutMove(board, stone, random) : id === 'fox' ? foxMove(board, stone, random) : owlMove(board, stone);
-  return { x: move.x, y: move.y };
+export function chooseMove(id: BrainId, board: Board, stone: Stone, random: Random = Math.random, rule: Rule = 'freestyle'): Point {
+  const move: Point | undefined = id === 'sprout' ? sproutMove(board, stone, random, rule) : id === 'fox' ? foxMove(board, stone, random, rule) : owlMove(board, stone, rule);
+  if (move) return { x: move.x, y: move.y };
+  // Every nearby point is forbidden (renju): take any legal point on the board.
+  const size = sizeOf(board);
+  for (let index = 0; index < board.length; index += 1) {
+    const point = { x: index % size, y: Math.floor(index / size) };
+    if (board[index] === EMPTY && legal(board, point, stone, rule)) return point;
+  }
+  return { x: 0, y: 0 };
 }

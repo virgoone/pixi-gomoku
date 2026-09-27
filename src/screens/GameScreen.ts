@@ -9,7 +9,8 @@ import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
 import { AiPlayer, type BrainId, brainInfo } from '../gomoku/ai';
-import { BLACK, GomokuGame, opponent, type Point, type Stone, WHITE } from '../gomoku/rules';
+import { FORBIDDEN_NAMES, forbiddenPoints, RULE_NAMES } from '../gomoku/renju';
+import { BLACK, BOARD_SIZE, GomokuGame, opponent, type Point, type Rule, type Stone, WHITE } from '../gomoku/rules';
 import type { NetMessage, OnlineLink } from '../net/online';
 import { ConfirmPopup } from '../popups/ConfirmPopup';
 import { PausePopup } from '../popups/PausePopup';
@@ -26,7 +27,7 @@ import { HomeScreen } from './HomeScreen';
 import { ResultScreen } from './ResultScreen';
 
 export type GameConfig =
-  | { mode: 'ai'; brain: BrainId; humanStone: Stone }
+  | { mode: 'ai'; brain: BrainId; humanStone: Stone; rule?: Rule }
   | { mode: 'local' }
   | { mode: 'online'; link: OnlineLink; myStone: Stone; round: number };
 
@@ -39,7 +40,7 @@ export class GameScreen extends Container {
   private boardGlow = new Sprite(tex('glow'));
   private modeBar: TabBar;
   private board = new BoardView();
-  private game = new GomokuGame();
+  private game: GomokuGame;
   private gameId = crypto.randomUUID();
   private cards = new Map<Stone, PlayerCard>();
   private status: Text;
@@ -60,6 +61,7 @@ export class GameScreen extends Container {
 
   constructor(private config: GameConfig) {
     super();
+    this.game = new GomokuGame(BOARD_SIZE, config.mode === 'ai' ? config.rule ?? 'freestyle' : 'freestyle');
     this.status = label('', 'heading', { fontSize: 24 });
     this.menu = new IconButton({ icon: 'menu', size: 56, onPress: () => this.openMenu() });
     this.undoButton = new Button({ text: '悔棋', skin: 'white', width: 170, height: 70, icon: 'undo', fontSize: 24, onPress: () => this.undo() });
@@ -76,7 +78,7 @@ export class GameScreen extends Container {
     this.board.onTouchPreviewChange = () => this.updateStatus();
     this.addChild(this.backdrop, this.boardGlow, this.board, this.status, this.undoButton, this.resignButton, this.modeBar, this.menu);
     this.setupPlayers();
-    if (config.mode === 'ai') this.ai = new AiPlayer(config.brain);
+    if (config.mode === 'ai') this.ai = new AiPlayer(config.brain, this.game.rule);
     if (config.mode === 'online') this.listenOnline(config.link);
   }
 
@@ -84,7 +86,8 @@ export class GameScreen extends Container {
   private modeText() {
     const config = this.config;
     if (config.mode === 'local') return '同屏双人';
-    if (config.mode === 'ai') return `人机 · ${brainInfo(config.brain).name}`;
+    // The robot icon already says "AI", so renju swaps the prefix to keep the chip short.
+    if (config.mode === 'ai') return `${this.game.rule === 'renju' ? RULE_NAMES.renju : '人机'} · ${brainInfo(config.brain).name}`;
     return `在线 · 房间 ${config.link.code}`;
   }
 
@@ -134,11 +137,21 @@ export class GameScreen extends Container {
     this.alpha = 0;
     gsap.to(this, { alpha: 1, duration: 0.3 });
     await gsap.from(this.board.scale, { x: 0.85, y: 0.85, duration: 0.4, ease: 'back.out(1.8)' });
+    if (this.game.rule === 'renju') toast(this, '连珠规则：黑棋不能下三三、四四、长连', this.w);
     this.nextTurn();
   }
 
   async hide() {
     await gsap.to(this, { alpha: 0, duration: 0.2 });
+  }
+
+  /** Dev only: play `moves` before the game is shown. */
+  preload(moves: Array<[number, number]>) {
+    for (const [x, y] of moves) {
+      const stone = this.game.turn;
+      if (this.game.play(x, y).kind !== 'placed') break;
+      this.board.placeStone(x, y, stone, false);
+    }
   }
 
   private nextTurn() {
@@ -148,6 +161,7 @@ export class GameScreen extends Container {
     const seat = this.seatOf(turn);
     this.board.turnStone = turn;
     this.board.acceptingInput = seat === 'human';
+    this.board.setForbidden(seat === 'human' && this.game.rule === 'renju' && turn === BLACK ? forbiddenPoints(this.game.board) : []);
     for (const [stone, card] of this.cards) card.setActive(stone === turn, stone === turn && seat === 'ai');
     for (const [stone, card] of this.cards) if (!(stone === turn && seat === 'ai')) card.setStatus(this.describe(stone).subtitle);
 
@@ -192,6 +206,11 @@ export class GameScreen extends Container {
     const result = this.game.play(point.x, point.y);
     if (result.kind === 'invalid') {
       sfx.invalid();
+      return false;
+    }
+    if (result.kind === 'forbidden') {
+      sfx.invalid();
+      toast(this, `禁手：${FORBIDDEN_NAMES[result.reason]}，黑棋不能下这里`, this.w);
       return false;
     }
     this.board.placeStone(point.x, point.y, stone);
@@ -255,6 +274,7 @@ export class GameScreen extends Container {
     this.token += 1;
     this.board.acceptingInput = false;
     this.board.hideGhost();
+    this.board.setForbidden([]);
     for (const card of this.cards.values()) card.setActive(false);
     this.undoButton.setEnabled(false);
     this.resignButton.setEnabled(false);

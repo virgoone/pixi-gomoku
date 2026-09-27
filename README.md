@@ -25,6 +25,7 @@
   基于 WebRTC（PeerJS 公共信令服务器）点对点传输，不需要自建后端。
   **30 秒内没人加入会自动改为和「狐狸阿明」对战**；对局中对手掉线，也由狐狸阿明接手。
 - 规则：15×15 棋盘，黑先，五子或以上连成一线即胜（无禁手）。支持悔棋（人机/同屏）、认输、再来一局（在线会交换先后手）。
+- 连珠模式（人机对战里切换）：按 RIF 连珠规则，黑棋只有恰好五连才算胜，不能下三三、四四、长连；成五优先于禁手，白棋不受限制。轮到你执黑时禁手点会标红叉，AI 执黑不会下禁手，执白也不会去堵黑棋下不了的禁手点。禁手判定在 `src/gomoku/renju.ts`，用开源引擎 [Rapfi](https://github.com/dhbloo/rapfi) 的 `YXSHOWFORBID` 在约 4 万个禁手点上做过对拍，抽样结果存在 `tests/fixtures/renju-rapfi.json`。暂未包含开局规则（三手交换、五手两打），同屏与在线仍是无禁手。
 - 触屏上第一次点击是预览，再点一次同一位置才落子，防误触。
 
 ## 结算动画
@@ -168,7 +169,7 @@ src/
   ui/                按钮、面板、HUD、棋盘、玩家卡、彩纸、提示条
   screens/           Load / Home / Game / Result
   popups/            人机设置、在线房间、暂停、确认
-  gomoku/            rules.ts 规则与对局；ai/ 棋型评估、三个棋手、Worker
+  gomoku/            rules.ts 规则与对局；renju.ts 连珠禁手；ai/ 棋型评估、三个棋手、Worker
   net/online.ts      PeerJS 房间、消息协议、心跳
   result/            结算计分与宝箱动画
 tests/               Vitest 单元测试

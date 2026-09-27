@@ -1,4 +1,4 @@
-import type { Board, Point, Stone } from '../rules';
+import type { Board, Point, Rule, Stone } from '../rules';
 import type { AiRequest, AiResponse } from './ai.worker';
 import { type BrainId, chooseMove } from './brains';
 
@@ -10,7 +10,7 @@ export class AiPlayer {
   private nextId = 1;
   private pending = new Map<number, { resolve: (point: Point) => void; board: Board; stone: Stone }>();
 
-  constructor(readonly brain: BrainId) {
+  constructor(readonly brain: BrainId, readonly rule: Rule = 'freestyle') {
     try {
       this.worker = new Worker(new URL('./ai.worker.ts', import.meta.url), { type: 'module' });
       this.worker.onmessage = (event: MessageEvent<AiResponse>) => {
@@ -33,13 +33,13 @@ export class AiPlayer {
     const started = performance.now();
     const move = await new Promise<Point>((resolve) => {
       if (!this.worker) {
-        resolve(chooseMove(this.brain, board, stone));
+        resolve(chooseMove(this.brain, board, stone, Math.random, this.rule));
         return;
       }
       const id = this.nextId++;
       const snapshot = new Uint8Array(board);
       this.pending.set(id, { resolve, board: snapshot, stone });
-      this.worker.postMessage({ id, brain: this.brain, board: snapshot, stone } satisfies AiRequest);
+      this.worker.postMessage({ id, brain: this.brain, board: snapshot, stone, rule: this.rule } satisfies AiRequest);
     });
     const elapsed = performance.now() - started;
     if (elapsed < minDelay) await new Promise((resolve) => setTimeout(resolve, minDelay - elapsed));
@@ -51,7 +51,7 @@ export class AiPlayer {
     this.worker = null;
     const waiting = [...this.pending.values()];
     this.pending.clear();
-    for (const request of waiting) request.resolve(chooseMove(this.brain, request.board, request.stone));
+    for (const request of waiting) request.resolve(chooseMove(this.brain, request.board, request.stone, Math.random, this.rule));
   }
 
   dispose() {

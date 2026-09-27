@@ -1,4 +1,5 @@
 import type { BrainId } from '../gomoku/ai';
+import type { Rule } from '../gomoku/rules';
 import { LocalProgress, PROGRESS_PREFIX } from '../profile/localProgress';
 import { COUNTERS, type ProgressReceipt } from '../profile/progress';
 
@@ -15,6 +16,8 @@ export type Profile = {
   muted: boolean;
   lastBrain: BrainId;
   playFirst: boolean;
+  /** Rule last picked for AI games. */
+  rule: Rule;
   nickname: string;
 };
 
@@ -30,6 +33,7 @@ const defaults = (): Profile => ({
   muted: false,
   lastBrain: 'fox',
   playFirst: true,
+  rule: 'freestyle',
   nickname: `棋手${Math.floor(100 + Math.random() * 900)}`,
 });
 

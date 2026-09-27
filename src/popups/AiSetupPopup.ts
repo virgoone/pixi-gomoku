@@ -6,24 +6,28 @@ import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
 import { BRAINS, type BrainId } from '../gomoku/ai';
-import { BLACK, WHITE } from '../gomoku/rules';
+import { RULE_NAMES } from '../gomoku/renju';
+import { BLACK, type Rule, WHITE } from '../gomoku/rules';
 import { Button } from '../ui/Button';
 import { label } from '../ui/Label';
 import { card } from '../ui/Panel';
 import { BasePopup } from './BasePopup';
 
-/** Pick an AI opponent and who moves first. */
+/** Pick an AI opponent, who moves first and the rule. */
 export class AiSetupPopup extends BasePopup {
   private brain: BrainId;
   private playFirst: boolean;
+  private rule: Rule;
   private cards = new Map<BrainId, { bg: NineSliceSprite; root: Container }>();
   private firstButton: Button;
+  private ruleButton: Button;
 
-  constructor(private onStart: (brain: BrainId, humanStone: 1 | 2) => void) {
+  constructor(private onStart: (brain: BrainId, humanStone: 1 | 2, rule: Rule) => void) {
     super('选择对手', 640, 640);
     const profile = getProfile();
     this.brain = profile.lastBrain;
     this.playFirst = profile.playFirst;
+    this.rule = profile.rule;
 
     const cardWidth = 180;
     const cardHeight = 300;
@@ -60,8 +64,10 @@ export class AiSetupPopup extends BasePopup {
       this.body.addChild(root);
     });
 
-    this.firstButton = new Button({ text: this.firstText(), skin: 'white', width: 300, height: 66, fontSize: 22, onPress: () => this.toggleFirst() });
-    this.firstButton.y = 150;
+    this.firstButton = new Button({ text: this.firstText(), skin: 'white', width: 280, height: 66, fontSize: 22, onPress: () => this.toggleFirst() });
+    this.firstButton.position.set(-148, 150);
+    this.ruleButton = new Button({ text: this.ruleText(), skin: 'white', width: 280, height: 66, fontSize: 22, onPress: () => this.toggleRule() });
+    this.ruleButton.position.set(148, 150);
     const start = new Button({
       text: '开始对局',
       skin: 'yellow',
@@ -69,14 +75,15 @@ export class AiSetupPopup extends BasePopup {
       height: 84,
       icon: 'play',
       onPress: () => {
-        updateProfile({ lastBrain: this.brain, playFirst: this.playFirst });
+        updateProfile({ lastBrain: this.brain, playFirst: this.playFirst, rule: this.rule });
         const brain = this.brain;
         const stone = this.playFirst ? BLACK : WHITE;
-        void navigation.dismissPopup().then(() => this.onStart(brain, stone));
+        const rule = this.rule;
+        void navigation.dismissPopup().then(() => this.onStart(brain, stone, rule));
       },
     });
     start.y = 238;
-    this.body.addChild(this.firstButton, start);
+    this.body.addChild(this.firstButton, this.ruleButton, start);
   }
 
   private firstText() {
@@ -86,6 +93,15 @@ export class AiSetupPopup extends BasePopup {
   private toggleFirst() {
     this.playFirst = !this.playFirst;
     this.firstButton.setText(this.firstText());
+  }
+
+  private ruleText() {
+    return this.rule === 'renju' ? `${RULE_NAMES.renju} · 黑棋有禁手` : `${RULE_NAMES.freestyle} · 自由五子`;
+  }
+
+  private toggleRule() {
+    this.rule = this.rule === 'renju' ? 'freestyle' : 'renju';
+    this.ruleButton.setText(this.ruleText());
   }
 
   private select(id: BrainId) {

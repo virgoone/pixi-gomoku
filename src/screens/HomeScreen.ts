@@ -139,7 +139,7 @@ export class HomeScreen extends Container {
   }
 
   private openAi() {
-    void navigation.present(new AiSetupPopup((brain, humanStone) => void navigation.goTo(new GameScreen({ mode: 'ai', brain, humanStone }))));
+    void navigation.present(new AiSetupPopup((brain, humanStone, rule) => void navigation.goTo(new GameScreen({ mode: 'ai', brain, humanStone, rule }))));
   }
 
   private openOnline(code?: string) {
