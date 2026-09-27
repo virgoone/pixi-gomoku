@@ -272,7 +272,8 @@ export class LeaderboardView extends Container {
     rename.position.set(this.w / 2 - 24 - 84 - 8 - 42, 0);
     out.position.set(this.w / 2 - 24 - 42, 0);
     if (compact) {
-      summary.y = -28;
+      summary.anchor.set(0.5);
+      summary.position.set(0, -28);
       rename.position.set(-49, 20);
       out.position.set(49, 20);
     }
