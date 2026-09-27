@@ -46,10 +46,11 @@ function forcedMove(board: Board, stone: Stone, rule: Rule): Point | null {
   for (const point of candidates) {
     if (evaluatePoint(board, point.x, point.y, stone).score >= SCORE.FIVE && legal(board, point, stone, rule)) return point;
   }
-  // No need to block a five the opponent is not allowed to play.
+  // No need to block a five the opponent is not allowed to play, and no way to
+  // block one on a point we are not allowed to play ourselves.
   const other = opponent(stone);
   for (const point of candidates) {
-    if (evaluatePoint(board, point.x, point.y, other).score >= SCORE.FIVE && legal(board, point, other, rule)) return point;
+    if (evaluatePoint(board, point.x, point.y, other).score >= SCORE.FIVE && legal(board, point, other, rule) && legal(board, point, stone, rule)) return point;
   }
   return null;
 }

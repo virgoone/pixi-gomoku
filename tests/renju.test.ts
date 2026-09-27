@@ -111,6 +111,16 @@ describe('renju games', () => {
     expect(game.winner).toBe(WHITE);
   });
 
+  test.each(['sprout', 'fox', 'owl'] as const)('%s as black does not block a five on its own forbidden point', (brain) => {
+    // White threatens five at (7, 7) (the other end is blocked); for black (7, 7) is a double-three.
+    const board = createBoard();
+    for (const [x, y] of [[5, 7], [6, 7], [7, 9], [7, 10], [2, 2]]) board[y * 15 + x] = BLACK;
+    for (const [x, y] of [[3, 3], [4, 4], [5, 5], [6, 6], [14, 14]]) board[y * 15 + x] = WHITE;
+    expect(forbiddenAt(board, 7, 7)).toBe('double-three');
+    const move = chooseMove(brain, board, BLACK, () => 0.5, 'renju');
+    expect(forbiddenAt(board, move.x, move.y)).toBeNull();
+  });
+
   test.each(['sprout', 'fox', 'owl'] as const)('%s never plays a forbidden point as black', (brain) => {
     let seed = 7;
     const random = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
