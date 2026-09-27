@@ -193,7 +193,8 @@ export class OnlinePopup extends BasePopup {
         return;
       }
       const rule = agreedRule(this.rule, link.opponentProtocol);
-      const notice = rule !== this.rule ? '对方的版本还不支持连珠，本局按无禁手进行' : undefined;
+      // No hello within the wait (protocol 0) is not the same as an old client: say which.
+      const notice = rule === this.rule ? undefined : link.opponentProtocol === 0 ? '没等到对方的版本信息，本局按无禁手进行' : '对方的版本还不支持连珠，本局按无禁手进行';
       link.send({ type: 'start', hostStone: BLACK, round: 1, rule });
       void navigation.dismissPopup().then(() => this.callbacks.onStart(link, BLACK, rule, notice));
     });
