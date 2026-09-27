@@ -1,8 +1,16 @@
 # Pixi 五子棋 · Gomoku
 
+[在线试玩](https://gomoku.douni.one/) · [MIT License](./LICENSE) · [用 Opus 开发的过程与提示词](./docs/BUILDING-WITH-OPUS.md)
+
+用 **Claude Code + Opus** 起步并持续迭代的开源浏览器五子棋。基于 **PixiJS 8、TypeScript、Vite**，支持三档 AI、同屏双人和 WebRTC 好友对战；配有开箱结算动画、邮箱登录、排行榜及跨设备存档。
+
+**打开就能下棋，不用注册。** 邀请好友时分享房间链接；想查看排行榜、合并不同设备的战绩和奖励时，再用自己的邮箱登录。
+
 一个用 [PixiJS v8](https://pixijs.com/) 写的休闲五子棋小游戏。工程结构参照
 [pixijs/open-games](https://github.com/pixijs/open-games) 里的 *Puzzling Potions*
 （screens / popups / ui / navigation 分层），主要美术资源是手写 SVG，在加载阶段栅格化成纹理；排行榜空状态另用一张透明 PNG 插画。
+
+开发分工：Claude Code / Opus 完成游戏主体与初版登录排行榜，后续用 Codex 补齐移动端交互、部署、历史存档迁移和榜单一致性等工程细节。仓库保留对应提交与测试，便于复现和继续修改。
 
 ## 玩法
 
@@ -124,6 +132,23 @@ Cloudflare DNS 使用 `gomoku` CNAME 指向 `pixi-gomoku.netlify.app`，DNS only
 
 在线房间依赖 PeerJS 公共信令和 WebRTC，部分防火墙/NAT 网络可能无法直连；人机与同屏模式不受影响。
 
+## Google Analytics（可选）
+
+在 GA4 中新建网站数据流，再在 Netlify 的构建环境中添加：
+
+| 变量 | 示例 | 用途 |
+| --- | --- | --- |
+| `VITE_GA_MEASUREMENT_ID` | `G-XXXXXXXXXX` | 你自己的 GA4 衡量 ID（公开标识符） |
+| `VITE_ANALYTICS_ORIGIN` | `https://gomoku.douni.one` | 唯一允许上报的正式站点 origin |
+
+修改后重新构建。未配置 ID 时不加载统计；开发模式、Deploy Preview 与其他域名也不发送事件。Fork 部署请同时设置自己的 ID 和 origin。
+
+统计包括 `page_view`、`level_start`（开局）、`level_end`（胜负、模式、手数、结束原因）和 `view_leaderboard`。只记录新发生的对局，不把历史存档同步计作新游戏。链接可使用 `utm_source`、`utm_medium`、`utm_campaign` 区分推广来源。
+
+事件不包含邮箱、昵称、房间号、棋谱或账号 ID；页面 URL 只保留路径和上述简单 UTM 标签，来源 URL 只保留域名。关闭 Google Signals 和广告个性化信号。建议创建数据流时关闭增强型衡量，只使用标准页面浏览和代码中的游戏事件。GA 自身仍会使用客户端标识符统计访问，部署者应按自己的发布地区设置适当的隐私说明与同意机制。
+
+上线验证：浏览器 Network 中检查 `gtag/js` 与 GA `collect` 请求，随后在 GA4 实时报告中确认 `page_view` 和游戏事件；常规报表可能延迟。广告拦截器或网络限制可能阻止统计，不影响对局。
+
 ## 目录
 
 ```
@@ -145,3 +170,7 @@ tests/               Vitest 单元测试
 - 架构参考 [pixijs/open-games](https://github.com/pixijs/open-games)（MIT）
 - 字体：Google Fonts 的 ZCOOL KuaiLe、Lilita One
 - 动画：[GSAP](https://gsap.com/)
+
+## 开源许可
+
+项目代码采用 [MIT License](./LICENSE)，欢迎 Fork、修改和用于自己的项目。依赖库与字体保留各自的许可证；部署凭据、Resend Key 和 Fish Audio Key 需自行配置，不能放进源码或 `VITE_*` 变量。
