@@ -1,10 +1,11 @@
-import { Container, type Text, type Ticker } from 'pixi.js';
+import { Container, Sprite, type Text, type Ticker } from 'pixi.js';
 import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
 import { speak } from '../app/voice';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
+import { tex } from '../app/textures';
 import { AiPlayer, type BrainId, brainInfo } from '../gomoku/ai';
 import { BLACK, GomokuGame, opponent, type Point, type Stone, WHITE } from '../gomoku/rules';
 import type { NetMessage, OnlineLink } from '../net/online';
@@ -17,6 +18,7 @@ import { BoardView } from '../ui/BoardView';
 import { Button, IconButton } from '../ui/Button';
 import { label } from '../ui/Label';
 import { PlayerCard } from '../ui/PlayerCard';
+import { TabBar } from '../ui/TabBar';
 import { toast } from '../ui/Toast';
 import { HomeScreen } from './HomeScreen';
 import { ResultScreen } from './ResultScreen';
@@ -31,7 +33,9 @@ type Seat = 'human' | 'ai' | 'remote';
 const stoneName = (stone: Stone) => (stone === BLACK ? '黑棋' : '白棋');
 
 export class GameScreen extends Container {
-  private backdrop = new Backdrop('backdrop-game', { rays: false, sparkles: 12 });
+  private backdrop = new Backdrop('backdrop-game', { raysTint: 0xb9a0ff, sparkles: 12 });
+  private boardGlow = new Sprite(tex('glow'));
+  private modeBar: TabBar;
   private board = new BoardView();
   private game = new GomokuGame();
   private cards = new Map<Stone, PlayerCard>();
@@ -57,12 +61,30 @@ export class GameScreen extends Container {
     this.undoButton = new Button({ text: '悔棋', skin: 'white', width: 170, height: 70, icon: 'undo', fontSize: 24, onPress: () => this.undo() });
     this.resignButton = new Button({ text: '认输', skin: 'red', width: 170, height: 70, icon: 'flag', fontSize: 24, onPress: () => this.askResign() });
     this.undoButton.visible = config.mode !== 'online';
+    this.backdrop.rays.alpha = 0.16;
+    this.boardGlow.anchor.set(0.5);
+    this.boardGlow.tint = 0xffc27a;
+    this.boardGlow.alpha = 0.35;
+    this.boardGlow.blendMode = 'add';
+    this.modeBar = new TabBar([{ id: 'mode', text: this.modeText(), icon: this.modeIcon() }], 'mode');
 
     this.board.onCell = (point) => this.onLocalMove(point);
-    this.addChild(this.backdrop, this.board, this.status, this.undoButton, this.resignButton, this.menu);
+    this.addChild(this.backdrop, this.boardGlow, this.board, this.status, this.undoButton, this.resignButton, this.modeBar, this.menu);
     this.setupPlayers();
     if (config.mode === 'ai') this.ai = new AiPlayer(config.brain);
     if (config.mode === 'online') this.listenOnline(config.link);
+  }
+
+  /** Text for the top-left mode chip. */
+  private modeText() {
+    const config = this.config;
+    if (config.mode === 'local') return '同屏双人';
+    if (config.mode === 'ai') return `人机 · ${brainInfo(config.brain).name}`;
+    return `在线 · 房间 ${config.link.code}`;
+  }
+
+  private modeIcon() {
+    return this.config.mode === 'local' ? 'users' : this.config.mode === 'ai' ? 'robot' : 'globe';
   }
 
   // ---- players ------------------------------------------------------------------------
@@ -124,6 +146,7 @@ export class GameScreen extends Container {
     else if (seat === 'ai') this.status.text = `${this.describe(turn).name}正在思考`;
     else this.status.text = `等待${this.describe(turn).name}落子`;
 
+    gsap.fromTo(this.status, { alpha: 0.3 }, { alpha: 1, duration: 0.3 });
     this.undoButton.setEnabled(this.canUndo());
     this.resignButton.setEnabled(!this.ended && (this.config.mode === 'local' || this.game.history.length > 0));
     if (seat === 'ai') void this.aiTurn();
@@ -248,10 +271,10 @@ export class GameScreen extends Container {
 
   /** What the announcer says when the game ends. */
   private announcement(winner: Stone | null, myStone: Stone | null, reason: Outcome['reason']) {
-    if (winner === null) return '平局，势均力敌！';
-    if (myStone === null) return reason === 'resign' ? `${stoneName(opponent(winner))}认输，${stoneName(winner)}获胜！` : `五子连珠，${stoneName(winner)}获胜！`;
-    if (winner === myStone) return reason === 'resign' ? '对手认输，你赢了！' : '五子连珠，你赢了！';
-    return reason === 'resign' ? '你认输了，下次加油！' : '很遗憾，你输了，再接再厉！';
+    if (winner === null) return '平局，棋逢对手。';
+    if (myStone === null) return reason === 'resign' ? `${stoneName(winner)}赢了，对方认输。` : `五子连珠，${stoneName(winner)}赢了！`;
+    if (winner === myStone) return reason === 'resign' ? '对手认输啦，你赢了！' : '漂亮，你赢了！';
+    return reason === 'resign' ? '没关系，下一局再来。' : '差一点点，再来一局吧。';
   }
 
   private replayConfig(): GameConfig {
@@ -292,6 +315,7 @@ export class GameScreen extends Container {
           this.opponentGone = false;
           this.config = { mode: 'ai', brain: 'fox', humanStone: myStone };
           this.ai = new AiPlayer('fox');
+          this.modeBar.setText('mode', this.modeText());
           this.undoButton.visible = true;
           this.setupPlayers();
           this.nextTurn();
@@ -354,20 +378,23 @@ export class GameScreen extends Container {
       this.resignButton.scale.set(cardScale);
       this.undoButton.position.set(right, height * 0.62);
       this.resignButton.position.set(right, height * 0.62 + 90 * cardScale);
-      this.menu.position.set(40, 40);
+      this.placeTopBar(Math.min(1, (this.board.x - 24) / 300));
     } else {
-      const top = 150;
+      const barBottom = this.placeTopBar(Math.min(1, (width - 24) / 360));
+      const cardScale = Math.min(1, (width - 24) / 2 / (black.cardWidth + 8));
+      black.scale.set(cardScale);
+      white.scale.set(cardScale);
+      const cardsY = barBottom + 12;
+      black.position.set(12, cardsY);
+      white.position.set(width - 12 - white.cardWidth * cardScale, cardsY);
+      const cardsBottom = cardsY + 92 * cardScale;
+      this.status.position.set(width / 2, cardsBottom + 22);
+      this.status.scale.set(Math.min(1, (width - 32) / (this.status.width / this.status.scale.x)));
+      const top = cardsBottom + 44;
       const bottom = 110;
       const boardSize = Math.min(width - 16, height - top - bottom);
       this.board.layout(boardSize);
       this.board.position.set((width - boardSize) / 2, top + (height - top - bottom - boardSize) / 2);
-      const cardScale = Math.min(1, (width - 24) / 2 / (black.cardWidth + 8));
-      black.scale.set(cardScale);
-      white.scale.set(cardScale);
-      black.position.set(12, 64);
-      white.position.set(width - 12 - white.cardWidth * cardScale, 64);
-      this.status.position.set(width / 2, 34);
-      this.status.scale.set(Math.min(1, (width - 140) / (this.status.width / this.status.scale.x)));
       const buttonScale = Math.min(1, width / 440);
       this.undoButton.scale.set(buttonScale);
       this.resignButton.scale.set(buttonScale);
@@ -378,8 +405,20 @@ export class GameScreen extends Container {
       } else {
         this.resignButton.position.set(width / 2, by);
       }
-      this.menu.position.set(36, 34);
     }
+    const size = this.board.boardPixelSize;
+    this.boardGlow.position.set(this.board.x + size / 2, this.board.y + size / 2);
+    this.boardGlow.width = this.boardGlow.height = size * 1.6;
+  }
+
+  /** Menu button and mode chip in the top-left tray. Returns the bar's bottom edge. */
+  private placeTopBar(scale: number) {
+    const s = Math.max(0.6, scale);
+    this.menu.scale.set(s * 0.86);
+    this.menu.position.set(12 + 28 * s, 12 + 28 * s);
+    this.modeBar.scale.set(s);
+    this.modeBar.position.set(12 + 64 * s, 12);
+    return 12 + this.modeBar.barHeight * s;
   }
 
   update(ticker: Ticker) {

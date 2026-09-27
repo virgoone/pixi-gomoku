@@ -309,7 +309,7 @@ export class ResultScreen extends Container {
     // Burst open behind a full-screen flash.
     this.fx.screenFlash(this.w, this.h, 0.9);
     sfx.open();
-    speak(`恭喜获得${TIERS[finalTier].name}！`, { delay: 0.2 });
+    speak(`哇，是${TIERS[finalTier].name}！`, { delay: 0.3 });
     this.backdrop.setRays({ alpha: 0.9, scale: this.backdrop.rays.scale.x * 1.3 }, 0.6);
     const opening = chest.open();
     const mouth = chest.toGlobal(chest.mouth);
@@ -342,7 +342,6 @@ export class ResultScreen extends Container {
     const center = this.chestCenter;
     chest.flashWhite();
     sfx.upgrade();
-    speak('升级！', { rate: 1.2, pitch: 1.3 });
     this.fx.ring(center.x, center.y, { from: 50 * scale, to: 330 * scale, width: 5, duration: 0.6 });
     this.fx.ring(center.x, center.y, { from: 30 * scale, to: 240 * scale, width: 3, duration: 0.55, delay: 0.08 });
     this.flashBurst(colors.glow);

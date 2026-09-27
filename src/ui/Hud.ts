@@ -6,6 +6,10 @@ import { tex } from '../app/textures';
 import { label } from './Label';
 
 export type Currency = 'coins' | 'gems' | 'crowns';
+
+const PILL_W = 108;
+const GAP = 8;
+const format = (value: number) => value.toLocaleString('en-US');
 const ICON: Record<Currency, string> = { coins: 'coin', gems: 'gem', crowns: 'crown' };
 
 /** Top-right currency counters, as in the reference result screen. */
@@ -20,18 +24,19 @@ export class Hud extends Container {
     for (const currency of ['coins', 'gems', 'crowns'] as Currency[]) {
       const item = new Container();
       const bg = new NineSliceSprite({ texture: tex('pill'), leftWidth: 24, rightWidth: 24, topHeight: 20, bottomHeight: 20 });
-      bg.width = 112;
+      bg.width = PILL_W;
       bg.height = 40;
+      // Icon sits inside the pill and the count is bold white, as in the reference.
       const icon = new Sprite(tex(ICON[currency]));
       icon.anchor.set(0.5);
-      icon.width = icon.height = 38;
-      icon.position.set(8, 20);
-      const text = label(String(profile[currency]), 'number', { fontSize: 20 });
+      icon.width = icon.height = 28;
+      icon.position.set(22, 20);
+      const text = label(format(profile[currency]), 'number', { fontSize: 19, stroke: { color: 0x0e0620, width: 4, join: 'round' } });
       text.anchor.set(0, 0.5);
-      text.position.set(32, 20);
+      text.position.set(42, 20);
       item.addChild(bg, icon, text);
       item.x = x;
-      x += 124;
+      x += PILL_W + GAP;
       this.addChild(item);
       this.values.set(currency, { text, value: { v: profile[currency] }, icon, baseScale: icon.scale.x });
     }
@@ -45,7 +50,7 @@ export class Hud extends Container {
   }
 
   get totalWidth() {
-    return 124 * 3 - 12;
+    return PILL_W * 3 + GAP * 2;
   }
 
   /** Global position of a currency icon, for rewards flying into the HUD. */
@@ -60,7 +65,7 @@ export class Hud extends Container {
     if (!entry) return;
     gsap.killTweensOf(entry.value);
     entry.value.v = Math.round(entry.value.v + amount);
-    entry.text.text = String(entry.value.v);
+    entry.text.text = format(entry.value.v);
     gsap.killTweensOf(entry.icon.scale);
     const base = entry.baseScale;
     gsap.fromTo(entry.icon.scale, { x: base * 1.35, y: base * 1.35 }, { x: base, y: base, duration: 0.25, ease: 'back.out(3)' });
@@ -73,7 +78,7 @@ export class Hud extends Container {
       v: target,
       duration: 0.8,
       ease: 'power2.out',
-      onUpdate: () => void (entry.text.text = String(Math.round(entry.value.v))),
+      onUpdate: () => void (entry.text.text = format(Math.round(entry.value.v))),
     });
     const base = entry.baseScale;
     gsap.killTweensOf(entry.icon.scale);

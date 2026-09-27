@@ -87,8 +87,9 @@ export const board = () => {
       <stop offset="1" stop-color="#5a2a08" stop-opacity="0.28"/>
     </radialGradient>
   </defs>
-  <rect x="6" y="14" width="988" height="980" rx="56" fill="${INK}"/>
-  <rect x="6" y="6" width="988" height="980" rx="56" fill="url(#frame)" stroke="${INK}" stroke-width="8"/>
+  <rect x="6" y="22" width="988" height="974" rx="56" fill="${INK}"/>
+  <rect x="6" y="6" width="988" height="974" rx="56" fill="#5a2a0c" stroke="${INK}" stroke-width="8"/>
+  <rect x="6" y="6" width="988" height="956" rx="56" fill="url(#frame)" stroke="${INK}" stroke-width="8"/>
   <rect x="22" y="18" width="956" height="22" rx="11" fill="#fff" fill-opacity="0.18"/>
   <rect x="${BOARD_INSET - 8}" y="${BOARD_INSET - 8}" width="${1000 - 2 * (BOARD_INSET - 8)}" height="${1000 - 2 * (BOARD_INSET - 8) - 8}" rx="30" fill="#4a2208" fill-opacity="0.55"/>
   <rect x="${BOARD_INSET}" y="${BOARD_INSET}" width="${1000 - 2 * BOARD_INSET}" height="${1000 - 2 * BOARD_INSET - 8}" rx="24" fill="url(#wood)"/>
@@ -435,10 +436,10 @@ export const glowDisc = () =>
 
 /** 20 god-rays fading outward. */
 export const rays = () => {
-  const count = 20;
+  const count = 14;
   const wedges = Array.from({ length: count }, (_, index) => {
-    const a = (index / count) * Math.PI * 2;
-    const spread = (Math.PI / count) * 0.55;
+    const a = (index / count) * Math.PI * 2 + (index % 2) * 0.08;
+    const spread = (Math.PI / count) * (index % 2 ? 0.35 : 0.6);
     const r = 512;
     const x1 = 512 + Math.cos(a - spread) * r;
     const y1 = 512 + Math.sin(a - spread) * r;
@@ -446,15 +447,22 @@ export const rays = () => {
     const y2 = 512 + Math.sin(a + spread) * r;
     return `<path d="M512 512 L${x1.toFixed(1)} ${y1.toFixed(1)} L${x2.toFixed(1)} ${y2.toFixed(1)} Z"/>`;
   }).join('');
+  // Soft beams: blurred wedges fading out from a bright core.
   return svg(1024, 1024, `
   <defs>
     <radialGradient id="fade" cx="0.5" cy="0.5" r="0.5">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.55"/>
-      <stop offset="0.6" stop-color="#fff" stop-opacity="0.16"/>
+      <stop offset="0" stop-color="#fff" stop-opacity="0.5"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0.14"/>
       <stop offset="1" stop-color="#fff" stop-opacity="0"/>
     </radialGradient>
+    <radialGradient id="core" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.35"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="soft" x="-10%" y="-10%" width="120%" height="120%"><feGaussianBlur stdDeviation="10"/></filter>
   </defs>
-  <g fill="url(#fade)">${wedges}</g>`);
+  <g fill="url(#fade)" filter="url(#soft)">${wedges}</g>
+  <circle cx="512" cy="512" r="300" fill="url(#core)"/>`);
 };
 
 /** Glowing platform ring under the chest; white, tinted per tier. */
@@ -473,19 +481,33 @@ export const ring = () =>
 
 /** Full-screen background: a vertical radial wash with scattered star dust. */
 export const backdrop = (inner: string, outer: string) => {
-  const dust = Array.from({ length: 70 }, (_, index) => {
+  const dust = Array.from({ length: 60 }, (_, index) => {
     const x = (index * 173) % 1000;
     const y = (index * 311) % 1000;
-    const r = 1 + (index % 3);
-    return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" fill-opacity="${0.08 + (index % 5) * 0.04}"/>`;
+    const r = 1 + (index % 3) * 0.8;
+    return `<circle cx="${x}" cy="${y}" r="${r}" fill="#fff" fill-opacity="${0.06 + (index % 5) * 0.03}"/>`;
   }).join('');
+  // The reference's faint tiled four-point stars.
+  const star = (x: number, y: number, r: number) =>
+    `<path d="M${x} ${y - r} Q${x} ${y} ${x + r} ${y} Q${x} ${y} ${x} ${y + r} Q${x} ${y} ${x - r} ${y} Q${x} ${y} ${x} ${y - r} Z"/>`;
   return svg(1000, 1000, `
-  <defs><radialGradient id="g" cx="0.5" cy="0.42" r="0.75">
-    <stop offset="0" stop-color="${inner}"/>
-    <stop offset="1" stop-color="${outer}"/>
-  </radialGradient></defs>
+  <defs>
+    <radialGradient id="g" cx="0.5" cy="0.4" r="0.72">
+      <stop offset="0" stop-color="${inner}"/>
+      <stop offset="1" stop-color="${outer}"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.45" r="0.72">
+      <stop offset="0.55" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="0.45"/>
+    </radialGradient>
+    <pattern id="stars" width="80" height="80" patternUnits="userSpaceOnUse">
+      <g fill="#fff" fill-opacity="0.07">${star(20, 20, 7)}${star(60, 60, 7)}</g>
+    </pattern>
+  </defs>
   <rect width="1000" height="1000" fill="url(#g)"/>
-  ${dust}`);
+  <rect width="1000" height="1000" fill="url(#stars)"/>
+  ${dust}
+  <rect width="1000" height="1000" fill="url(#vignette)"/>`);
 };
 
 // ---- UI chrome ----------------------------------------------------------------------
@@ -569,10 +591,47 @@ export const rewardCard = (rainbow = false) =>
   <rect x="11" y="11" width="118" height="112" rx="16" fill="none" stroke="${rainbow ? 'url(#rainbow)' : '#fff1b8'}" stroke-width="${rainbow ? 6 : 3}" stroke-opacity="${rainbow ? 1 : 0.8}"/>
   <rect x="20" y="16" width="100" height="8" rx="4" fill="#fff" fill-opacity="0.6"/>`);
 
-/** Small dark pill for currency counters; nine-slice (slice 24). */
+/** Compact dark pill for currency counters, as in the reference; nine-slice (slice 20). */
 export const pill = () =>
   svg(96, 48, `
-  <rect x="2" y="2" width="92" height="44" rx="22" fill="#12072a" fill-opacity="0.72" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>`);
+  <rect x="2" y="2" width="92" height="44" rx="22" fill="#0e0620" fill-opacity="0.72" stroke="#000" stroke-opacity="0.35" stroke-width="3"/>
+  <rect x="12" y="6" width="72" height="4" rx="2" fill="#fff" fill-opacity="0.06"/>`);
+
+/** Dark rounded tray holding the tab chips; nine-slice (slice 22). */
+export const tabTray = () =>
+  svg(96, 56, `
+  <rect x="2" y="2" width="92" height="52" rx="18" fill="#0e0620" fill-opacity="0.7" stroke="#000" stroke-opacity="0.35" stroke-width="3"/>`);
+
+/** Active tab chip: bright yellow with an ink outline; nine-slice (slice 18). */
+export const tabChip = () =>
+  svg(96, 44, `
+  <defs><linearGradient id="t" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffe96e"/><stop offset="1" stop-color="#ffb320"/>
+  </linearGradient></defs>
+  <rect x="2" y="2" width="92" height="40" rx="14" fill="url(#t)" stroke="${INK}" stroke-width="3"/>
+  <rect x="10" y="6" width="76" height="6" rx="3" fill="#fff" fill-opacity="0.5"/>`);
+
+/** Chunky tile in the reward-card style, in any colour; nine-slice (slice 40). */
+export const tile = (top: string, bottom: string, frame: string) =>
+  svg(140, 140, `
+  <defs>
+    <linearGradient id="face" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${top}"/>
+      <stop offset="1" stop-color="${bottom}"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="10" width="132" height="126" rx="22" fill="${INK}"/>
+  <rect x="4" y="4" width="132" height="126" rx="22" fill="url(#face)" stroke="${INK}" stroke-width="5"/>
+  <rect x="11" y="11" width="118" height="112" rx="16" fill="none" stroke="${frame}" stroke-width="3" stroke-opacity="0.8"/>
+  <rect x="20" y="16" width="100" height="8" rx="4" fill="#fff" fill-opacity="0.45"/>`);
+
+/** Gold frame drawn around the player tile whose turn it is; nine-slice (slice 40). */
+export const tileFrame = () =>
+  svg(140, 140, `
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#fff3a6"/><stop offset="0.5" stop-color="#ffc83a"/><stop offset="1" stop-color="#ff9a1f"/>
+  </linearGradient></defs>
+  <rect x="3" y="3" width="134" height="134" rx="26" fill="none" stroke="url(#g)" stroke-width="6"/>`);
 
 // ---- line icons (white, tinted by the button) -----------------------------------------
 
@@ -593,6 +652,8 @@ export const ICONS = {
   users: () => icon('<circle cx="24" cy="22" r="9"/><path d="M8 52 Q10 36 24 36 Q38 36 40 52"/><circle cx="44" cy="24" r="7"/><path d="M42 36 Q54 36 56 50"/>'),
   globe: () => icon('<circle cx="32" cy="32" r="22"/><path d="M10 32 H54"/><path d="M32 10 Q20 32 32 54 Q44 32 32 10"/>'),
   play: () => icon('<path d="M22 14 L50 32 L22 50 Z" fill="#fff"/>'),
+  swords: () => icon('<path d="M12 12 L40 40 M52 12 L24 40"/><path d="M34 46 L46 34 M18 34 L30 46"/><path d="M40 40 L52 52 M24 40 L12 52"/>'),
+  trophy: () => icon('<path d="M20 10 H44 V26 A12 12 0 0 1 20 26 Z" fill="#fff" fill-opacity="0.25"/><path d="M20 16 H10 Q10 30 22 30 M44 16 H54 Q54 30 42 30"/><path d="M32 38 V48 M22 54 H42"/>'),
   restart: () => icon('<path d="M48 22 A20 20 0 1 0 52 36"/><path d="M50 10 V24 H36"/>'),
 };
 

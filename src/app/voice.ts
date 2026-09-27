@@ -9,14 +9,29 @@ import { getProfile } from './storage';
 const synth = typeof window !== 'undefined' && 'speechSynthesis' in window ? window.speechSynthesis : null;
 let voice: SpeechSynthesisVoice | null = null;
 
+/**
+ * Rank Mandarin voices: neural "natural" voices (Edge/Windows Xiaoxiao,
+ * Xiaoyi, Yunxi…), then good platform voices (Google, Apple Tingting/Meijia),
+ * then any Chinese voice. The older compact voices sound robotic.
+ */
+function score(v: SpeechSynthesisVoice) {
+  if (!/^zh/i.test(v.lang)) return -1;
+  let points = /zh[-_]CN/i.test(v.lang) ? 10 : 0;
+  if (/natural|neural|online/i.test(v.name)) points += 100;
+  if (/xiaoxiao|xiaoyi|yunxi|xiaohan|xiaomo/i.test(v.name)) points += 50;
+  if (/google/i.test(v.name)) points += 40;
+  if (/tingting|meijia|lili|yu-shu/i.test(v.name)) points += 30;
+  if (/compact|huihui|kangkang|yaoyao/i.test(v.name)) points -= 20;
+  return points;
+}
+
 function pickVoice() {
   if (!synth) return;
-  const voices = synth.getVoices();
-  voice =
-    voices.find((v) => /zh[-_]CN/i.test(v.lang) && /xiaoxiao|tingting|google/i.test(v.name)) ??
-    voices.find((v) => /zh[-_]CN/i.test(v.lang)) ??
-    voices.find((v) => /^zh/i.test(v.lang)) ??
-    null;
+  const ranked = synth
+    .getVoices()
+    .filter((v) => score(v) >= 0)
+    .sort((a, b) => score(b) - score(a));
+  voice = ranked[0] ?? null;
 }
 
 if (synth) {
@@ -39,9 +54,10 @@ export function speak(text: string, options: { rate?: number; pitch?: number; de
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = voice?.lang ?? 'zh-CN';
     if (voice) utterance.voice = voice;
-    utterance.rate = options.rate ?? 1.05;
-    utterance.pitch = options.pitch ?? 1.1;
-    utterance.volume = 1;
+    // Natural pace and pitch; pushing them up is what makes TTS sound robotic.
+    utterance.rate = options.rate ?? 1;
+    utterance.pitch = options.pitch ?? 1;
+    utterance.volume = 0.9;
     // A new line replaces whatever is still being said.
     synth.cancel();
     synth.speak(utterance);
