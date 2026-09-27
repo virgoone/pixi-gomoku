@@ -72,7 +72,7 @@ export class HomeScreen extends Container {
     this.buildStats();
     this.statsView.visible = false;
     this.boardView.visible = false;
-    this.footer = label('PixiJS · 所有画面均为 SVG 绘制', 'small', { fontSize: 12, fill: 0x9a8bc8 });
+    this.footer = label('五子连珠，一起开局', 'small', { fontSize: 12, fill: 0x9a8bc8 });
 
     this.addChild(this.backdrop, this.stones, this.eyebrow, this.title, this.playView, this.statsView, this.boardView, this.footer, this.tabs, this.hud, this.sound);
   }

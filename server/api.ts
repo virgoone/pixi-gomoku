@@ -22,8 +22,6 @@ import type { KV } from './kv';
 
 export type ApiEnv = AuthEnv & {
   board: KV;
-  /** Local dev only: return the sign-in code in the response when no mail key is set. */
-  exposeDevCode?: boolean;
 };
 
 const json = (status: number, body: unknown, headers: Record<string, string> = {}) =>
@@ -46,7 +44,7 @@ function sameOrigin(request: Request) {
   const origin = request.headers.get('origin');
   if (!origin) return true;
   try {
-    return new URL(origin).host === new URL(request.url).host;
+    return new URL(origin).origin === new URL(request.url).origin;
   } catch {
     return false;
   }
@@ -86,6 +84,7 @@ export async function handleApi(request: Request, env: ApiEnv): Promise<Response
     }
 
     if (path === '/api/leaderboard' && method === 'GET') {
+      if (!(await currentUser())) return fail(401, 'unauthorized', '登录后查看排行榜');
       const board = await readBoard(env.board);
       const etag = `"v${board.version}"`;
       // Clients poll with If-None-Match; an unchanged board costs one small read and no body.
@@ -108,7 +107,10 @@ export async function handleApi(request: Request, env: ApiEnv): Promise<Response
     if (path === '/api/results' && method === 'POST') {
       const user = await currentUser();
       if (!user) return fail(401, 'unauthorized', '登录后成绩才能上榜');
-      const outcome = await submitGame(env.board, user, await readJson(request), env.now?.() ?? Date.now());
+      const body = await readJson(request);
+      // A different tab may have switched the shared cookie to another account.
+      if (body.userId !== user.id) return fail(409, 'account_changed', '登录账号已切换，请重新登录后同步');
+      const outcome = await submitGame(env.board, user, body, env.now?.() ?? Date.now());
       return json(200, outcome);
     }
 

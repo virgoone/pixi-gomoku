@@ -3,7 +3,6 @@ import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
 import { account, type SubmitResult } from '../net/account';
-import { openSignIn } from '../ui/authDialog';
 import { say } from '../app/voice';
 import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
@@ -82,7 +81,6 @@ export class ResultScreen extends Container {
   private unsubscribers: Array<() => void> = [];
   /** Leaderboard submission for this game, once sent. */
   private ladder: Promise<SubmitResult | null> | null = null;
-  private ladderButton: Button | null = null;
   private keyHandler = (event: KeyboardEvent) => {
     if (event.key === 'Enter' || event.key === ' ') this.onTap();
   };
@@ -146,52 +144,10 @@ export class ResultScreen extends Container {
     return this.outcome.mode !== 'local' && Boolean(this.outcome.moves?.length);
   }
 
-  /** Submit now if signed in; otherwise offer a sign-in that records this game. */
+  /** Save every rated game locally; signed-in players also synchronize it. */
   private setupLadder() {
     if (!this.rated) return;
-    const decide = () => {
-      if (this.destroyed || this.ladder) return;
-      if (account.user) this.ladder = this.submitLadder();
-      else if (account.available) this.showLadderButton();
-    };
-    if (account.known) decide();
-    else void account.refresh().then(decide);
-  }
-
-  private submitLadder() {
-    return account.submit(this.outcome).catch((error: Error) => {
-      if (!this.destroyed) toast(this, error.message, this.w, this.ladderToastY);
-      return null;
-    });
-  }
-
-  private showLadderButton() {
-    const button = new Button({
-      text: '登录记录这局',
-      skin: 'blue',
-      width: 190,
-      height: 52,
-      fontSize: 18,
-      icon: 'podium',
-      onPress: async () => {
-        const user = await openSignIn('登录后，这一局和之后的成绩都会进入排行榜。');
-        if (!user || this.destroyed || this.ladder) return;
-        this.ladder = this.submitLadder();
-        button.visible = false;
-        this.announceLadder();
-      },
-    });
-    this.ladderButton = button;
-    this.addChild(button);
-    this.placeLadderButton();
-  }
-
-  private placeLadderButton() {
-    const button = this.ladderButton;
-    if (!button) return;
-    const scale = Math.min(1, this.w / 520);
-    button.scale.set(scale);
-    button.position.set(12 + 95 * scale, 12 + 26 * scale + (this.w < this.hud.totalWidth + 240 ? 16 + this.hud.totalHeight : 0) * scale);
+    this.ladder = account.submit(this.outcome).catch(() => null);
   }
 
   /** Where the reward cards were: free once the rewards are collected. */
@@ -203,7 +159,11 @@ export class ResultScreen extends Container {
   /** Tell the player what the game did on the leaderboard. */
   private announceLadder() {
     void this.ladder?.then((result) => {
-      if (!result || this.destroyed) return;
+      if (this.destroyed) return;
+      if (!result) {
+        toast(this, account.user ? '成绩已保存在本机，联网后自动同步' : '成绩已保存在本机，查看排行榜时登录同步', this.w, this.ladderToastY);
+        return;
+      }
       const gained = result.points > 0 ? `排行榜 +${result.points} 分` : '成绩已记录';
       toast(this, result.rank ? `${gained} · 第 ${result.rank} 名` : gained, this.w, this.ladderToastY);
     });
@@ -268,7 +228,6 @@ export class ResultScreen extends Container {
     this.buttonsLayer.position.set(width / 2, this.floor + (40 + 150 + 30 + 42) * uiScale);
     this.hud.scale.set(hudScale);
     this.hud.position.set(width - this.hud.totalWidth * hudScale - 14, 16);
-    this.placeLadderButton();
   }
 
   // ---- sequence -----------------------------------------------------------------------

@@ -1,5 +1,5 @@
-import type { Stone } from '../gomoku/rules';
 import type { Outcome } from '../result/scoring';
+import { ResultQueue } from './resultQueue';
 
 /**
  * Client side of the email sign-in and the leaderboard (served by the
@@ -54,6 +54,13 @@ class Account {
   available = true;
   private listeners = new Set<Listener>();
   private checking: Promise<void> | null = null;
+  private queue = new ResultQueue((() => { try { return localStorage; } catch { return null; } })());
+  private syncing: Promise<Map<string, SubmitResult>> | null = null;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+  constructor() {
+    if (typeof window !== 'undefined') window.addEventListener('online', () => void this.refresh());
+  }
 
   onChange(listener: Listener) {
     this.listeners.add(listener);
@@ -64,6 +71,13 @@ class Account {
     this.user = user;
     this.known = true;
     for (const listener of this.listeners) listener(user);
+    if (user) {
+      this.queue.claim(user.id);
+      void this.sync();
+    } else if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
+    }
   }
 
   refresh() {
@@ -94,7 +108,7 @@ class Account {
   }
 
   async signOut() {
-    await call('/auth/sign-out', { method: 'POST', body: '{}' }).catch(() => undefined);
+    await call('/auth/sign-out', { method: 'POST', body: '{}' });
     this.set(null);
   }
 
@@ -108,31 +122,69 @@ class Account {
     return call<{ user: PublicUser; player: Player | null; rank: number | null }>('/me');
   }
 
-  /** Send a finished game for the leaderboard. Only AI and online games count. */
-  submit(outcome: Outcome) {
-    if (outcome.mode === 'local' || !outcome.moves || outcome.myStone === null) return Promise.resolve(null);
-    const body = {
-      mode: outcome.mode,
-      brain: outcome.brain,
-      myStone: outcome.myStone,
-      moves: outcome.moves,
-      resigned: outcome.resignedBy ?? null,
-    } satisfies { mode: string; brain?: string; myStone: Stone; moves: Array<[number, number]>; resigned: Stone | null };
-    return call<SubmitResult>('/results', { method: 'POST', body: JSON.stringify(body) });
+  /** Always save locally first; only an authenticated account may upload. */
+  async submit(outcome: Outcome): Promise<SubmitResult | null> {
+    const gameId = this.queue.record(outcome, this.user?.id ?? null);
+    if (!gameId) return null;
+    if (!this.known) await this.refresh();
+    if (!this.user) return null;
+    this.queue.claim(this.user.id);
+    return (await this.sync()).get(gameId) ?? null;
+  }
+
+  get pendingGames() {
+    return this.user ? this.queue.pending(this.user.id).length : this.queue.all().filter((entry) => entry.ownerId === null && !entry.rejected).length;
+  }
+
+  sync(): Promise<Map<string, SubmitResult>> {
+    if (!this.user) return Promise.resolve(new Map());
+    if (this.syncing) return this.syncing;
+    const userId = this.user.id;
+    this.syncing = (async () => {
+      const results = new Map<string, SubmitResult>();
+      for (const entry of this.queue.pending(userId)) {
+        if (this.user?.id !== userId) break;
+        try {
+          const result = await call<SubmitResult>('/results', { method: 'POST', body: JSON.stringify({ ...entry.submission, userId }) });
+          this.queue.acknowledge(entry.submission.gameId);
+          results.set(entry.submission.gameId, result);
+          for (const listener of this.listeners) listener(this.user);
+        } catch (error) {
+          if (error instanceof ApiError && (error.status === 400 || error.status === 422)) {
+            this.queue.reject(entry, error.message);
+            continue;
+          }
+          if (error instanceof ApiError && (error.status === 401 || error.code === 'account_changed')) this.set(null);
+          else {
+            if (this.retryTimer !== null) clearTimeout(this.retryTimer);
+            this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.sync(); }, error instanceof ApiError && error.status === 429 ? 8200 : 30_000);
+          }
+          break;
+        }
+      }
+      return results;
+    })().finally(() => {
+      this.syncing = null;
+      if (this.user && this.pendingGames && this.retryTimer === null) {
+        this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.sync(); }, 100);
+      }
+    });
+    return this.syncing;
   }
 }
 
 export const account = new Account();
 
 /**
- * Poll the leaderboard. The server answers 304 while nothing changed, so a
- * poll every few seconds costs almost nothing ("real-time" on Netlify, which
- * has no long-lived connections).
+ * Poll the leaderboard while visible. A 304 avoids downloading an unchanged
+ * board, but authentication, function invocations and storage reads still run.
  */
 export class BoardFeed {
   private etag: string | null = null;
   private timer: number | null = null;
   private stopped = true;
+  private generation = 0;
+  private inFlight: number | null = null;
   board: Board | null = null;
 
   constructor(
@@ -144,15 +196,23 @@ export class BoardFeed {
   start() {
     if (!this.stopped) return;
     this.stopped = false;
+    this.generation += 1;
     document.addEventListener('visibilitychange', this.onVisibility);
     void this.tick();
   }
 
   stop() {
     this.stopped = true;
+    this.generation += 1;
     if (this.timer !== null) window.clearTimeout(this.timer);
     this.timer = null;
     document.removeEventListener('visibilitychange', this.onVisibility);
+  }
+
+  reset() {
+    this.stop();
+    this.etag = null;
+    this.board = null;
   }
 
   /** Fetch right now (e.g. after submitting a result). */
@@ -164,24 +224,39 @@ export class BoardFeed {
 
   private onVisibility = () => {
     if (!document.hidden) this.poke();
+    else if (this.timer !== null) {
+      window.clearTimeout(this.timer);
+      this.timer = null;
+    }
   };
 
   private async tick() {
     this.timer = null;
-    if (this.stopped) return;
+    if (this.stopped || document.hidden || this.inFlight === this.generation) return;
+    const generation = this.generation;
+    this.inFlight = generation;
     try {
       const response = await fetch(`${API}/leaderboard`, { cache: 'no-store', headers: this.etag ? { 'if-none-match': this.etag } : {} });
+      if (this.stopped || generation !== this.generation) return;
       if (response.status !== 304) {
         const type = response.headers.get('content-type') ?? '';
+        if (response.status === 401) {
+          void account.refresh();
+          throw new ApiError(401, 'unauthorized', '请重新登录后查看排行榜');
+        }
         if (!response.ok || !type.includes('application/json')) throw new ApiError(response.status, 'unavailable', '排行榜服务暂不可用');
-        this.board = (await response.json()) as Board;
+        const board = (await response.json()) as Board;
+        if (this.stopped || generation !== this.generation) return;
+        this.board = board;
         this.etag = response.headers.get('etag');
-        if (!this.stopped) this.onBoard(this.board);
+        if (!this.stopped && generation === this.generation) this.onBoard(this.board);
       }
     } catch (error) {
-      if (!this.stopped) this.onError(error instanceof ApiError ? error : new ApiError(0, 'offline', '网络不可用'));
+      if (!this.stopped && generation === this.generation) this.onError(error instanceof ApiError ? error : new ApiError(0, 'offline', '网络不可用'));
+    } finally {
+      if (this.inFlight === generation) this.inFlight = null;
     }
     // Background tabs stop polling until they become visible again.
-    if (!this.stopped && !document.hidden) this.timer = window.setTimeout(() => void this.tick(), this.intervalMs);
+    if (!this.stopped && !document.hidden && generation === this.generation) this.timer = window.setTimeout(() => void this.tick(), this.intervalMs);
   }
 }

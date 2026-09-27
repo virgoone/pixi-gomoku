@@ -26,6 +26,8 @@ export type Player = {
   bestStreak: number;
   updatedAt: number;
   lastSubmitAt: number;
+  /** Recorded atomically with totals: retries and other devices cannot double-credit a game. */
+  games?: Record<string, { result: 'win' | 'loss' | 'draw'; points: number; finishedAt: number }>;
 };
 
 export type BoardEntry = Pick<Player, 'userId' | 'name' | 'points' | 'wins' | 'losses' | 'draws' | 'bestStreak'>;
@@ -51,13 +53,19 @@ export class BoardError extends Error {
 }
 
 /** Validate the shape of a submission from the client. */
-export function parseSubmission(body: unknown): GameSubmission {
+export function parseSubmission(body: unknown): GameSubmission & { gameId: string; finishedAt: number } {
   const b = (body ?? {}) as Record<string, unknown>;
   const mode = b.mode === 'ai' || b.mode === 'online' ? b.mode : null;
   const brain = BRAINS.some((info) => info.id === b.brain) ? (b.brain as BrainId) : undefined;
   const myStone = b.myStone === BLACK || b.myStone === WHITE ? (b.myStone as Stone) : null;
   const resigned = b.resigned === BLACK || b.resigned === WHITE ? (b.resigned as Stone) : null;
   const moves = Array.isArray(b.moves) ? b.moves : null;
+  if (typeof b.gameId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(b.gameId)) {
+    throw new BoardError(400, 'bad_request', '缺少有效的对局编号');
+  }
+  if (typeof b.finishedAt !== 'number' || !Number.isSafeInteger(b.finishedAt) || b.finishedAt <= 0) {
+    throw new BoardError(400, 'bad_request', '对局时间不对');
+  }
   if (!mode || !myStone || !moves || (mode === 'ai' && !brain)) throw new BoardError(400, 'bad_request', '对局数据不完整');
   if (moves.length > BOARD_SIZE * BOARD_SIZE) throw new BoardError(400, 'bad_request', '对局数据不对');
   const clean: Array<[number, number]> = [];
@@ -67,7 +75,7 @@ export function parseSubmission(body: unknown): GameSubmission {
     }
     clean.push([move[0], move[1]]);
   }
-  return { mode, brain, myStone, moves: clean, resigned };
+  return { mode, brain, myStone, moves: clean, resigned, gameId: b.gameId, finishedAt: b.finishedAt };
 }
 
 /** Replay the game with the real rules and decide the player's result. */
@@ -116,11 +124,11 @@ export async function readBoard(kv: KV): Promise<Board> {
 }
 
 /** Apply a change to the leaderboard document with optimistic concurrency. */
-async function updateBoard(kv: KV, change: (entries: BoardEntry[]) => BoardEntry[], now: number) {
+async function updateBoard(kv: KV, change: (entries: BoardEntry[]) => BoardEntry[] | Promise<BoardEntry[]>, now: number) {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const current = await kv.get<Board>('board');
     const board = current?.value ?? { version: 0, updatedAt: 0, entries: [] };
-    const next: Board = { version: board.version + 1, updatedAt: now, entries: rankEntries(change(board.entries.map((e) => ({ ...e })))) };
+    const next: Board = { version: board.version + 1, updatedAt: now, entries: rankEntries(await change(board.entries.map((e) => ({ ...e })))) };
     const written = current ? await kv.set('board', next, { onlyIfMatch: current.etag }) : await kv.set('board', next, { onlyIfNew: true });
     if (written) return next;
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 60 * (attempt + 1)));
@@ -136,7 +144,33 @@ function rankOf(board: Board, userId: string) {
 export async function getPlayer(kv: KV, user: User) {
   const player = (await kv.get<Player>(`players/${user.id}`))?.value ?? null;
   const board = await readBoard(kv);
-  return { player, rank: rankOf(board, user.id) };
+  return { player: player ? publicPlayer(player) : null, rank: rankOf(board, user.id) };
+}
+
+function publicPlayer(player: Player) {
+  const { games: _games, ...stats } = player;
+  return stats;
+}
+
+function publishPlayer(kv: KV, userId: string, now: number) {
+  return updateBoard(kv, async (entries) => {
+    const latest = (await kv.get<Player>(`players/${userId}`))?.value;
+    const others = entries.filter((entry) => entry.userId !== userId);
+    return latest ? [...others, toEntry(latest)] : others;
+  }, now);
+}
+
+function streaks(games: NonNullable<Player['games']>) {
+  let streak = 0;
+  let bestStreak = 0;
+  // Offline devices can upload out of order. Use completion time, not upload order.
+  const sorted = Object.entries(games).sort(([a, ga], [b, gb]) => ga.finishedAt - gb.finishedAt || a.localeCompare(b));
+  for (const [, game] of sorted) {
+    if (game.result === 'win') streak += 1;
+    else if (game.result === 'loss') streak = 0;
+    bestStreak = Math.max(bestStreak, streak);
+  }
+  return { streak, bestStreak };
 }
 
 /** Record a verified game for the signed-in user and update the board. */
@@ -147,9 +181,17 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const current = await kv.get<Player>(key);
     const player = current?.value ?? emptyPlayer(user, now);
+    const receipt = player.games?.[game.gameId];
+    if (receipt) {
+      // Also repairs the public board if a previous request saved the player
+      // but lost its connection before publishing the board or returning a reply.
+      const board = await publishPlayer(kv, user.id, now);
+      return { result: receipt.result, points: receipt.points, duplicate: true, player: publicPlayer(player), rank: rankOf(board, user.id), version: board.version };
+    }
     if (now - player.lastSubmitAt < SUBMIT_INTERVAL_MS) throw new BoardError(429, 'too_fast', '提交太频繁，稍后再试');
     const points = ladderPoints(result, game.mode, game.brain);
-    const streak = result === 'win' ? player.streak + 1 : result === 'loss' ? 0 : player.streak;
+    const games = { ...player.games, [game.gameId]: { result, points, finishedAt: Math.min(game.finishedAt, now) } };
+    const { streak, bestStreak } = streaks(games);
     const next: Player = {
       ...player,
       name: user.name,
@@ -158,14 +200,15 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
       losses: player.losses + (result === 'loss' ? 1 : 0),
       draws: player.draws + (result === 'draw' ? 1 : 0),
       streak,
-      bestStreak: Math.max(player.bestStreak, streak),
+      bestStreak,
+      games,
       updatedAt: now,
       lastSubmitAt: now,
     };
     const written = current ? await kv.set(key, next, { onlyIfMatch: current.etag }) : await kv.set(key, next, { onlyIfNew: true });
     if (!written) continue;
-    const board = await updateBoard(kv, (entries) => [...entries.filter((e) => e.userId !== user.id), toEntry(next)], now);
-    return { result, points, player: next, rank: rankOf(board, user.id), version: board.version };
+    const board = await publishPlayer(kv, user.id, now);
+    return { result, points, duplicate: false, player: publicPlayer(next), rank: rankOf(board, user.id), version: board.version };
   }
   throw new BoardError(503, 'busy', '请稍后再试');
 }
@@ -173,10 +216,15 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
 /** Keep the player's board name in step with a rename. */
 export async function renamePlayer(kv: KV, user: User, now = Date.now()) {
   const key = `players/${user.id}`;
-  const current = await kv.get<Player>(key);
-  if (!current) return;
-  await kv.set(key, { ...current.value, name: user.name, updatedAt: now });
-  await updateBoard(kv, (entries) => entries.map((e) => (e.userId === user.id ? { ...e, name: user.name } : e)), now);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const current = await kv.get<Player>(key);
+    if (!current) return;
+    if (await kv.set(key, { ...current.value, name: user.name, updatedAt: now }, { onlyIfMatch: current.etag })) {
+      await publishPlayer(kv, user.id, now);
+      return;
+    }
+  }
+  throw new BoardError(503, 'busy', '请稍后再试');
 }
 
 /** Admin: take a player off the board and reset their record. */

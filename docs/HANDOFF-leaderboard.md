@@ -2,7 +2,7 @@
 
 仓库 `virgoone/pixi-gomoku`，PR #1（分支 `claude/leaderboard` → `main`）：https://github.com/virgoone/pixi-gomoku/pull/1
 
-代码已写完并在本地测通，**还没有在真实 Netlify 环境（Blobs、Resend 真发信）上跑过**。你的任务是把配置补齐、在 Deploy Preview 上验证，通过后再合并上线。
+本分支包含邮箱登录、排行榜与本机成绩补传。合并前必须通过下面的 Deploy Preview 验收；合并需要用户明确同意。
 
 ## 1. 这个 PR 做了什么
 
@@ -13,7 +13,9 @@
   - 积分：豆芽 1、狐狸阿明 3、猫头鹰棋圣 6、在线 5、平局 1；负局 0 分但记负场。每人 8 秒最多提交一次。
   - AI 着法在浏览器里算，服务器无法证明来自 AI；靠复盘、限频和管理员删人兜底。
 - **实时刷新**：Netlify Functions 不支持长连接，首页「排行」每 4 秒轮询，带 ETag，没变化回 304；标签页在后台时暂停。
-- **界面**：首页新增「排行」标签；登录框是 HTML 浮层；结算页显示「排行榜 +N 分 · 第 M 名」，未登录时左上角有「登录记录这局」。
+- **登录时机**：游戏与结算都不要求登录、不弹登录框；只有进入首页「排行」时要求登录。排行榜 API 也要求有效会话，退出后清除页面内的榜单。所有玩家都使用自己的邮箱登录。
+- **本机补传与跨设备合并**：每局结束先把完整棋谱、UUID 和结束时间保存到 localStorage；游客刷新后仍保留，登录后归属该账号并补传。已归属 A 的记录不会传给 B。网络失败、限流会保留并重试，收到成功响应才移除。不同设备向同一账号增量提交，玩家统计与已处理对局 ID 在同一个 Blobs 文档中条件写入，重复请求只记一次；连胜按结束时间合并计算。金币等宝箱存档仍属于本机。
+- **历史兼容**：旧版本只保存汇总战绩，没有棋谱、难度与对局编号，无法可靠换算成排行榜积分，因此保留本机存档，不追溯上传。新版本记录的完整对局可以离线补传。
 
 ## 2. 需要你配置的东西
 
@@ -22,11 +24,13 @@
 | 变量 | 必填 | 值 |
 | --- | --- | --- |
 | `AUTH_SECRET` | 是 | 至少 16 位随机串，用 `openssl rand -hex 32` 生成。**没配时所有 `/api/*` 返回 500「服务器未配置 AUTH_SECRET」**。以后更换会让所有人重新登录。 |
-| `RESEND_API_KEY` | 是 | Resend 控制台生成的 API Key。没配时验证码只打印在函数日志里，用户收不到。 |
+| `RESEND_API_KEY` | 是 | Resend 控制台生成的 API Key。线上缺失时返回 503，不生成或打印验证码。 |
 | `EMAIL_FROM` | 是 | 发件人，例如 `五子棋 <login@你的域名>`。域名必须先在 Resend 验证。 |
-| `ADMIN_EMAILS` | 否 | 逗号分隔的邮箱，这些账号可以把作弊玩家移出榜单。 |
+| `ADMIN_EMAILS` | 否 | 逗号分隔的邮箱，这些账号可以把作弊玩家移出榜单。每次读取会话重新检查名单，已有账号也能授予或撤销权限。 |
 
-变量作用域选 Functions（或 All scopes），Production 和 Deploy Previews 都要有，否则预览环境登录会 500。
+变量作用域选 Functions（或 All scopes），Production 和 Deploy Previews 都要有，否则预览环境登录会 500。免费套餐不支持细分作用域时使用 All scopes。生产和预览使用不同 AUTH_SECRET。
+
+当前站点复用 meme 的 Resend Key 和已验证域名 `no-reply.douni.one`，`EMAIL_FROM` 为 `五子棋 <info@no-reply.douni.one>`，`ADMIN_EMAILS` 为 `w2008second@gmail.com`。密钥仅在 Netlify 环境变量中，不提交到 Git。
 
 ### 2.2 Resend 发信域名
 
@@ -40,17 +44,17 @@
 
 - **Netlify Blobs**：在 Netlify 上自动可用，无需开关或密钥。
 - **函数**：`netlify.toml` 已声明 `[functions] directory = "netlify/functions"`、`node_bundler = "esbuild"`；函数 `netlify/functions/api.mts` 自己声明了路径 `/api/*`。
-- **存储隔离**：生产环境用 `gomoku-auth`、`gomoku-board` 两个 store；非生产部署（Deploy Preview、分支部署，按 Netlify 的 `CONTEXT` 变量判断）自动用 `gomoku-auth-preview`、`gomoku-board-preview`，不会污染正式榜单。
+- **存储隔离**：生产环境用 `gomoku-auth`、`gomoku-board` 两个 store；非生产部署（Deploy Preview、分支部署，按函数运行时 `context.deploy.context` 判断，未知上下文也按非生产处理）自动用 `gomoku-auth-preview`、`gomoku-board-preview`，不会污染正式榜单。
 
 ## 3. 在 Deploy Preview 上验证（合并前必须做）
 
-1. 配好变量后，在 PR 上触发一次 Deploy Preview（配置变了需要重新部署才生效）。
-2. 打开预览地址，确认 `GET /api/leaderboard` 返回 JSON：`{"version":0,"updatedAt":0,"entries":[]}`，响应头有 `etag`。
-3. 首页 → 「排行」→「登录上榜」→ 输入邮箱 → 收到邮件 → 输入验证码，排行页底部应显示「昵称 · 还没有成绩」。
-4. 回首页「对战」→「人机对战」→ 选豆芽 → 赢一局 → 结算页收下奖励后应提示「排行榜 +1 分 · 第 1 名」。
-5. 用另一个浏览器（或无痕窗口）打开「排行」不要刷新，在第一个浏览器再赢一局，第二个浏览器应在 5 秒内自动更新分数。
-6. 退出登录后再赢一局：结算页左上角应出现「登录记录这局」，登录后这一局会被记上。
-7. 在 Netlify → Logs → Functions 里确认 `api` 函数没有报错。
+1. 配好变量后，在 PR 上触发一次 Deploy Preview（配置变了需要重新部署才生效）；检查 `GET /api/auth/session` 为 `{"user":null}`，未登录访问 `/api/leaderboard` 和提交 `/api/results` 均为 401。
+2. 不登录玩一局人机：游戏与结算不弹登录，刷新后本机待上传棋谱仍在，网络中没有 `/api/results` 请求。
+3. 打开「排行」才弹登录；用自己的邮箱接收并输入验证码。登录成功后本机成绩补传，待同步数量归零，榜单出现积分；管理员邮箱的会话角色为 `admin`，普通账号为 `user`。
+4. 用第二个浏览器或另一设备登录同一邮箱；各完成不同对局，分数与场次应累加。重发同一 `gameId` 不重复计分；模拟断网、刷新、429 后仍能补传。
+5. 两个浏览器同时打开「排行」，一个提交成绩后，另一个应在下一次 4 秒轮询后更新；未变化返回 304，切到后台暂停请求。
+6. 退出后榜单立即隐藏，再玩一局仍不弹登录；下次进入排行并登录后补传。切换账号不上传已归属于旧账号的待传棋谱。
+7. 检查 Netlify 构建与 Functions 日志；预览数据只在 `gomoku-auth-preview` / `gomoku-board-preview`，正式 store 不出现测试战绩。
 
 出问题时先看函数日志：
 - `AUTH_SECRET is missing or too short` → 变量没配或没作用到 Functions / 当前部署上下文。
@@ -63,7 +67,7 @@
 
 ```bash
 npm ci
-npm test         # 42 个测试，其中 tests/server.test.ts 覆盖登录、复盘判定、积分、并发提交、接口
+npm test         # 规则、登录、接口、本机队列、跨设备去重、轮询与部署上下文隔离
 npm run build    # 浏览器端 + Node 端（函数、vite 配置）两套类型检查后打包
 npm run dev      # http://localhost:5173
 ```
@@ -74,7 +78,7 @@ npm run dev      # http://localhost:5173
 http://localhost:5173/?demo=result&brain=owl&moves=9&rated
 ```
 
-（先在首页「排行」里登录，再打开这个地址，开箱收下后会提交。）
+（无需先登录：结算时先保存在本机；之后在首页「排行」登录即可补传。开发演示不会进入生产包。）
 
 ## 5. 代码地图
 
@@ -86,10 +90,11 @@ http://localhost:5173/?demo=result&brain=owl&moves=9&rated
 | `server/board.ts` | 棋谱校验与复盘（`judge`）、积分、玩家战绩、排行榜文档（ETag 条件写入重试） |
 | `server/kv.ts` | 存储接口：`blobsKV`（生产）与 `MemoryKV`（测试、本地） |
 | `src/result/ladder.ts` | 积分表，前后端共用 |
-| `src/net/account.ts` | 前端：会话状态、登录、提交成绩、`BoardFeed` 轮询 |
+| `src/net/account.ts` | 前端：会话状态、登录、补传与重试、`BoardFeed` 轮询 |
+| `src/net/resultQueue.ts` | 每局独立 localStorage 记录，匿名认领、账号归属、确认后删除 |
 | `src/ui/authDialog.ts` | 登录 / 改名的 HTML 浮层 |
 | `src/ui/LeaderboardView.ts` | 首页排行面板 |
-| `src/screens/ResultScreen.ts` | 结算页自动提交与「登录记录这局」 |
+| `src/screens/ResultScreen.ts` | 结算时保存棋谱，登录后自动同步，不触发登录 |
 
 ## 6. 接口一览
 
@@ -100,13 +105,14 @@ http://localhost:5173/?demo=result&brain=owl&moves=9&rated
 | GET | `/api/auth/session` | 当前用户或 `null` |
 | POST | `/api/auth/sign-out` | 退出 |
 | GET / PATCH | `/api/me` | 我的战绩与名次 / 改昵称 `{ name }` |
-| GET | `/api/leaderboard` | 前 50 名，支持 `If-None-Match` → 304 |
-| POST | `/api/results` | `{ mode, brain?, myStone, moves: [[x,y],...], resigned? }` |
+| GET | `/api/leaderboard` | 需要登录；前 50 名，支持 `If-None-Match` → 304 |
+| POST | `/api/results` | 需要登录；`{ userId, gameId, finishedAt, mode, brain?, myStone, moves: [[x,y],...], resigned? }`，`gameId` 为 UUID v4，`finishedAt` 为 Unix 毫秒；账号必须与会话相同 |
 | DELETE | `/api/admin/players/:userId` | 仅 `ADMIN_EMAILS` 中的账号 |
 
 ## 7. 注意事项
 
 - 本仓库的约定：**合并 PR 要先经用户明确同意**；提交信息用英文，结尾带 `Co-Authored-By` 行（见历史提交）。
 - `.github/workflows/ci.yml` 目前只能手动触发（`workflow_dispatch`），PR 不会自动跑 CI；本地请跑 `npm test && npm run build`。
+- 手动发布通过 Netlify Git 构建一起打包静态页面与 Functions，校验提交 SHA、静态文件哈希及会话接口。不要用只有 dist 的 ZIP 发布覆盖含函数的站点。
 - 当前 GitHub Actions 因账号计费限额无法启动（之前的运行都是「recent account payments have failed or your spending limit needs to be increased」），不是代码问题。
 - 语音文件还没生成：需要用户提供 Fish Audio API Key 后运行 `FISH_API_KEY=... npm run voice`，把 `public/voice/` 下生成的 mp3 一起提交；在那之前游戏会退回浏览器语音。这件事和排行榜无关，可以之后再做。

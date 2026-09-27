@@ -14,6 +14,8 @@ export type AuthEnv = {
   resendApiKey?: string;
   emailFrom?: string;
   adminEmails: Set<string>;
+  /** Explicitly enabled only by the local development server and tests. */
+  exposeDevCode?: boolean;
   /** Clock override for tests. */
   now?: () => number;
 };
@@ -80,8 +82,7 @@ function otpEmailHtml(otp: string) {
 async function sendOtpEmail(env: AuthEnv, email: string, otp: string) {
   const apiKey = env.resendApiKey?.trim();
   if (!apiKey) {
-    // No mail provider configured (e.g. local dev): log it so sign-in still works.
-    console.warn(`[auth] RESEND_API_KEY missing; OTP for ${email}: ${otp}`);
+    if (!env.exposeDevCode) throw new AuthError(503, 'email_not_configured', '邮件服务暂不可用，请稍后再试');
     return;
   }
   const response = await fetch('https://api.resend.com/emails', {
@@ -111,6 +112,7 @@ export class AuthError extends Error {
 export async function requestOtp(env: AuthEnv, rawEmail: unknown) {
   const email = normalizeEmail(rawEmail);
   if (!email) throw new AuthError(400, 'invalid_email', '邮箱格式不对');
+  if (!env.resendApiKey?.trim() && !env.exposeDevCode) throw new AuthError(503, 'email_not_configured', '邮件服务暂不可用，请稍后再试');
   const now = env.now?.() ?? Date.now();
   const key = `otp/${await emailKey(env, email)}`;
   const existing = await env.auth.get<OtpRecord>(key);
@@ -120,7 +122,10 @@ export async function requestOtp(env: AuthEnv, rawEmail: unknown) {
   }
   const otp = randomCode();
   const record: OtpRecord = { hash: await sha256(`otp|${env.secret}|${email}|${otp}`), expiresAt: now + OTP_TTL_MS, attempts: 0, sentAt: now };
-  await env.auth.set(key, record);
+  const reserved = existing
+    ? await env.auth.set(key, record, { onlyIfMatch: existing.etag })
+    : await env.auth.set(key, record, { onlyIfNew: true });
+  if (!reserved) throw new AuthError(429, 'too_soon', '验证码正在发送，请稍后再试');
   await sendOtpEmail(env, email, otp);
   return { email, otp };
 }
@@ -133,24 +138,24 @@ export async function verifyOtp(env: AuthEnv, rawEmail: unknown, rawCode: unknow
   const now = env.now?.() ?? Date.now();
   const eKey = await emailKey(env, email);
   const otpKey = `otp/${eKey}`;
-  // Reserve an attempt before comparing: every guess, even parallel ones,
-  // must win a conditional write that bumps the counter, so no more than
-  // OTP_MAX_ATTEMPTS guesses are ever checked against one code.
+  const hash = await sha256(`otp|${env.secret}|${email}|${code}`);
+  // Every guess must win a conditional write before its result is returned,
+  // so concurrent requests cannot exceed the attempt limit or reuse a code.
   let record: OtpRecord | null = null;
   for (let tries = 0; tries < 10 && !record; tries += 1) {
     const entry = await env.auth.get<OtpRecord>(otpKey);
     if (!entry || entry.value.expiresAt < now) throw new AuthError(400, 'expired', '验证码已过期，请重新获取');
     if (entry.value.attempts >= OTP_MAX_ATTEMPTS) {
-      await env.auth.delete(otpKey);
       throw new AuthError(429, 'too_many_attempts', '尝试次数过多，请重新获取验证码');
     }
-    const reserved = { ...entry.value, attempts: entry.value.attempts + 1 };
-    if (await env.auth.set(otpKey, reserved, { onlyIfMatch: entry.etag })) record = reserved;
+    const valid = safeEqual(hash, entry.value.hash);
+    // Consume a correct code in the same conditional write as its attempt.
+    // Concurrent verification cannot turn one code into multiple sessions.
+    const reserved = { ...entry.value, attempts: valid ? OTP_MAX_ATTEMPTS : entry.value.attempts + 1 };
+    if (await env.auth.set(otpKey, reserved, { onlyIfMatch: entry.etag })) record = entry.value;
   }
   if (!record) throw new AuthError(429, 'busy', '请稍后再试');
-  const hash = await sha256(`otp|${env.secret}|${email}|${code}`);
   if (!safeEqual(hash, record.hash)) throw new AuthError(400, 'wrong_code', '验证码不对');
-  await env.auth.delete(otpKey);
 
   const userKey = `users/${eKey}`;
   let user = (await env.auth.get<User>(userKey))?.value;
@@ -171,8 +176,10 @@ export async function verifyOtp(env: AuthEnv, rawEmail: unknown, rawCode: unknow
   const token = randomHex(32);
   const session: SessionRecord = { userId: user.id, emailKey: eKey, expiresAt: now + SESSION_TTL_MS };
   await env.auth.set(`sessions/${await sha256(`session|${env.secret}|${token}`)}`, session);
-  return { user, token, expiresAt: session.expiresAt };
+  return { user: withRole(env, user), token, expiresAt: session.expiresAt };
 }
+
+const withRole = (env: AuthEnv, user: User): User => ({ ...user, role: env.adminEmails.has(user.email) ? 'admin' : 'user' });
 
 /** The signed-in user for a session token, or null. */
 export async function userForToken(env: AuthEnv, token: string | null): Promise<User | null> {
@@ -184,7 +191,8 @@ export async function userForToken(env: AuthEnv, token: string | null): Promise<
     await env.auth.delete(key);
     return null;
   }
-  return (await env.auth.get<User>(`users/${session.value.emailKey}`))?.value ?? null;
+  const user = (await env.auth.get<User>(`users/${session.value.emailKey}`))?.value;
+  return user ? withRole(env, user) : null;
 }
 
 export async function signOut(env: AuthEnv, token: string | null) {

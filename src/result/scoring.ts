@@ -6,6 +6,9 @@ import type { TierId } from '../svg/palette';
 export type Mode = 'ai' | 'local' | 'online';
 
 export type Outcome = {
+  /** Stable identity and completion time for offline / multi-device synchronization. */
+  gameId?: string;
+  finishedAt?: number;
   mode: Mode;
   /** Null on a draw. */
   winner: Stone | null;

@@ -1,3 +1,6 @@
+import { FONT_BODY, FONT_NUMBER, FONT_TITLE } from '../app/fonts';
+import { crownIcon } from '../svg/art';
+import { INK, SKINS } from '../svg/palette';
 import { getProfile } from '../app/storage';
 import { account, ApiError, type PublicUser } from '../net/account';
 
@@ -9,23 +12,27 @@ import { account, ApiError, type PublicUser } from '../net/account';
 
 const STYLE_ID = 'gomoku-dialog-style';
 const CSS = `
-.gd-overlay{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:16px;background:rgba(11,4,24,.72);animation:gd-fade .18s ease-out}
-.gd-panel{position:relative;width:min(380px,100%);box-sizing:border-box;padding:26px 22px 22px;border-radius:28px;background:linear-gradient(#3d2a6b,#241646);border:4px solid #2a1638;box-shadow:0 8px 0 #0d0620,inset 0 0 0 3px rgba(255,255,255,.1);color:#fff;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;animation:gd-pop .32s cubic-bezier(.2,1.6,.4,1)}
-.gd-title{margin:0 0 6px;text-align:center;font:28px "ZCOOL KuaiLe","PingFang SC",sans-serif;color:#ffd84a;text-shadow:0 3px 0 #2a1638,2px 0 0 #2a1638,-2px 0 0 #2a1638,0 -2px 0 #2a1638,0 2px 0 #2a1638}
-.gd-sub{margin:0 0 18px;text-align:center;font-size:14px;color:#d9ccff;line-height:1.5}
+.gd-overlay{position:fixed;inset:0;z-index:50;display:grid;place-items:center;box-sizing:border-box;height:100dvh;overflow-y:auto;overscroll-behavior:contain;padding:max(24px,env(safe-area-inset-top)) max(18px,env(safe-area-inset-right)) max(24px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left));background:rgba(11,4,24,.72);animation:gd-fade .18s ease-out}
+.gd-panel{position:relative;width:min(400px,100%);margin:auto;box-sizing:border-box;padding:20px 24px 26px;border-radius:34px;background:linear-gradient(#3d2a6b,#241646);border:4px solid ${INK};box-shadow:0 8px 0 #0d0620,inset 0 0 0 3px rgba(255,255,255,.1);color:#fff;font-family:${FONT_BODY};animation:gd-pop .32s cubic-bezier(.2,1.6,.4,1)}
+.gd-emblem{display:block;width:70px;height:70px;margin:0 auto 4px;pointer-events:none}
+.gd-title{margin:0 0 6px;text-align:center;font:32px ${FONT_TITLE};color:#ffd84a;text-shadow:0 3px 0 ${INK},2px 0 0 ${INK},-2px 0 0 ${INK},0 -2px 0 ${INK},0 2px 0 ${INK}}
+.gd-sub{margin:0 0 18px;text-align:center;font-size:14px;color:#e9e2ff;line-height:1.6;overflow-wrap:anywhere}
 .gd-label{display:block;margin:0 0 6px 4px;font-size:13px;font-weight:700;color:#c9bde8}
-.gd-input{width:100%;box-sizing:border-box;margin:0 0 14px;padding:12px 14px;border-radius:14px;border:3px solid #2a1638;background:#fff;color:#2a1638;font-size:17px;font-weight:600;outline:none}
+.gd-input{width:100%;box-sizing:border-box;margin:0 0 14px;padding:12px 14px;border-radius:14px;border:3px solid ${INK};background:#fff;color:${INK};font-size:17px;font-weight:600;outline:none}
 .gd-input:focus{box-shadow:0 0 0 3px #ffd84a}
-.gd-code{text-align:center;font-size:28px;letter-spacing:10px;font-family:"Lilita One","ZCOOL KuaiLe",sans-serif}
-.gd-btn{display:block;width:100%;margin:6px 0 0;padding:12px 16px 16px;border:4px solid #2a1638;border-radius:22px;background:linear-gradient(#ffe96e,#ffb320);box-shadow:inset 0 -8px 0 #ec8a0c,0 6px 0 #2a1638;color:#fff;font:22px "ZCOOL KuaiLe","PingFang SC",sans-serif;text-shadow:0 2px 0 #2a1638,2px 0 0 #2a1638,-2px 0 0 #2a1638,0 -2px 0 #2a1638,0 2px 0 #2a1638;cursor:pointer;transition:transform .08s}
-.gd-btn:active{transform:translateY(3px);box-shadow:inset 0 -6px 0 #ec8a0c,0 3px 0 #2a1638}
+.gd-code{text-align:center;font-size:28px;letter-spacing:10px;font-family:${FONT_NUMBER}}
+.gd-btn{position:relative;display:block;width:100%;margin:6px 0 0;padding:12px 16px 16px;border:4px solid ${INK};border-radius:22px;background:linear-gradient(${SKINS.yellow.top},${SKINS.yellow.bottom});box-shadow:inset 0 -8px 0 ${SKINS.yellow.edge},0 6px 0 ${INK};color:#fff;font:24px ${FONT_TITLE};text-shadow:0 2px 0 ${INK},2px 0 0 ${INK},-2px 0 0 ${INK},0 -2px 0 ${INK},0 2px 0 ${INK};cursor:pointer;transition:transform .08s}
+.gd-btn::before{content:"";position:absolute;top:5px;left:16px;right:16px;height:7px;border-radius:8px;background:rgba(255,255,255,.5);pointer-events:none}
+.gd-btn:active{transform:translateY(3px);box-shadow:inset 0 -6px 0 ${SKINS.yellow.edge},0 3px 0 ${INK}}
 .gd-btn[disabled]{opacity:.55;cursor:default}
 .gd-row{display:flex;justify-content:space-between;margin-top:12px;font-size:13px}
-.gd-link{border:0;background:none;color:#ffd84a;font-size:13px;font-weight:700;cursor:pointer;padding:4px}
+.gd-link{border:0;background:none;color:#ffd84a;font-size:13px;font-weight:700;cursor:pointer;min-height:44px;padding:8px}
 .gd-link[disabled]{color:#8f84b0;cursor:default}
 .gd-error{min-height:18px;margin:-6px 0 8px 4px;font-size:13px;font-weight:600;color:#ff9a8a}
 .gd-hint{margin:0 0 12px;padding:8px 10px;border-radius:10px;background:rgba(255,216,74,.14);color:#ffe98a;font-size:12px;text-align:center}
-.gd-close{position:absolute;top:-14px;right:-14px;width:44px;height:44px;border-radius:50%;border:4px solid #2a1638;background:linear-gradient(#ffa090,#f24d40);box-shadow:0 4px 0 #2a1638;color:#fff;font-size:20px;font-weight:900;cursor:pointer;line-height:1}
+.gd-close{position:absolute;top:12px;right:12px;width:44px;height:44px;border-radius:50%;border:4px solid ${INK};background:linear-gradient(${SKINS.red.top},${SKINS.red.bottom});box-shadow:0 4px 0 ${INK};color:#fff;font-size:20px;font-weight:900;cursor:pointer;line-height:1}
+@media(prefers-reduced-motion:reduce){.gd-overlay,.gd-panel{animation:none}.gd-btn{transition:none}}
+.gd-btn:focus-visible,.gd-close:focus-visible,.gd-link:focus-visible{outline:3px solid #ffd84a;outline-offset:4px}
 @keyframes gd-fade{from{opacity:0}}
 @keyframes gd-pop{from{transform:scale(.8);opacity:0}}
 `;
@@ -57,7 +64,10 @@ function shell<T>(title: string, subtitle: string) {
   closeButton.type = 'button';
   closeButton.setAttribute('aria-label', '关闭');
   const body = el('div');
-  panel.append(closeButton, el('h2', 'gd-title', title), el('p', 'gd-sub', subtitle), body);
+  const emblem = el('img', 'gd-emblem');
+  emblem.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(crownIcon())}`;
+  emblem.alt = '';
+  panel.append(closeButton, emblem, el('h2', 'gd-title', title), el('p', 'gd-sub', subtitle), body);
   overlay.appendChild(panel);
   document.body.appendChild(overlay);
 
@@ -65,12 +75,37 @@ function shell<T>(title: string, subtitle: string) {
   const done = new Promise<T | null>((resolve) => {
     settle = resolve;
   });
+  const previousFocus = document.activeElement as HTMLElement | null;
   const onKey = (event: KeyboardEvent) => {
+    event.stopPropagation();
     if (event.key === 'Escape') close(null);
+    if (event.key === 'Tab') {
+      const controls = [...panel.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled)')];
+      const first = controls[0];
+      const last = controls.at(-1);
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    }
   };
+  const viewport = window.visualViewport;
+  const resize = () => {
+    if (!viewport) return;
+    overlay.style.height = `${viewport.height}px`;
+    overlay.style.top = `${viewport.offsetTop}px`;
+    overlay.style.bottom = 'auto';
+  };
+  viewport?.addEventListener('resize', resize);
+  viewport?.addEventListener('scroll', resize);
+  resize();
+  let closed = false;
   function close(value: T | null) {
+    if (closed) return;
+    closed = true;
+    viewport?.removeEventListener('resize', resize);
+    viewport?.removeEventListener('scroll', resize);
     window.removeEventListener('keydown', onKey, true);
     overlay.remove();
+    previousFocus?.focus();
     settle(value);
   }
   closeButton.onclick = () => close(null);
@@ -85,7 +120,7 @@ const message = (error: unknown) => (error instanceof ApiError ? error.message :
 
 /** Email → 6-digit code → signed in. Resolves with the user, or null if dismissed. */
 export function openSignIn(reason = '登录后成绩会进入排行榜，别人也能看到你的昵称。'): Promise<PublicUser | null> {
-  const ui = shell<PublicUser>('登录上榜', reason);
+  const ui = shell<PublicUser>('登录看排行', reason);
   let email = '';
   let name = '';
   let cooldown = 0;
@@ -110,6 +145,7 @@ export function openSignIn(reason = '登录后成绩会进入排行榜，别人�
     Object.assign(nameInput, { type: 'text', name: 'nickname', autocomplete: 'nickname', maxLength: 12, value: name || getProfile().nickname });
     nameInput.id = nameLabel.htmlFor = 'gd-name';
     const errorLine = el('div', 'gd-error', error);
+    errorLine.setAttribute('role', 'alert');
     const submit = el('button', 'gd-btn', '发送验证码');
     submit.type = 'submit';
     form.append(emailLabel, emailInput, nameLabel, nameInput, errorLine, submit);
@@ -130,7 +166,9 @@ export function openSignIn(reason = '登录后成绩会进入排行榜，别人�
       }
     };
     ui.body.appendChild(form);
-    window.setTimeout(() => (email ? nameInput : emailInput).focus(), 50);
+    window.setTimeout(() => {
+      if (emailInput.isConnected && window.matchMedia('(pointer:fine)').matches) (email ? nameInput : emailInput).focus();
+    }, 50);
   }
 
   function startCooldown() {
@@ -152,11 +190,14 @@ export function openSignIn(reason = '登录后成绩会进入排行榜，别人�
     ui.subtitle.textContent = `验证码已发送到 ${email}，10 分钟内有效。`;
     const form = el('form');
     if (devCode) form.appendChild(el('div', 'gd-hint', `本地开发未配置邮件，验证码：${devCode}`));
+    const codeLabel = el('label', 'gd-label', '邮箱验证码');
     const codeInput = el('input', 'gd-input gd-code');
+    codeInput.id = codeLabel.htmlFor = 'gd-code';
     Object.assign(codeInput, { type: 'text', inputMode: 'numeric', autocomplete: 'one-time-code', maxLength: 6, pattern: '\\d{6}', placeholder: '······', required: true });
     codeInput.setAttribute('aria-label', '6 位验证码');
     const errorLine = el('div', 'gd-error', error);
-    const submit = el('button', 'gd-btn', '登录');
+    errorLine.setAttribute('role', 'alert');
+    const submit = el('button', 'gd-btn', '进入排行榜');
     submit.type = 'submit';
     const row = el('div', 'gd-row');
     const back = el('button', 'gd-link', '换个邮箱');
@@ -178,7 +219,7 @@ export function openSignIn(reason = '登录后成绩会进入排行榜，别人�
       }
     };
     row.append(back, resend);
-    form.append(codeInput, errorLine, submit, row);
+    form.append(codeLabel, codeInput, errorLine, submit, row);
     codeInput.oninput = () => {
       codeInput.value = codeInput.value.replace(/\D/g, '').slice(0, 6);
       if (codeInput.value.length === 6) form.requestSubmit();
@@ -193,7 +234,7 @@ export function openSignIn(reason = '登录后成绩会进入排行榜，别人�
         ui.close(user);
       } catch (err) {
         submit.disabled = false;
-        submit.textContent = '登录';
+        submit.textContent = '进入排行榜';
         errorLine.textContent = message(err);
         codeInput.select();
       }
@@ -210,13 +251,16 @@ export function openSignIn(reason = '登录后成绩会进入排行榜，别人�
 export function openRename(current: string): Promise<PublicUser | null> {
   const ui = shell<PublicUser>('修改昵称', '排行榜上显示的名字，1–12 个字。');
   const form = el('form');
+  const nameLabel = el('label', 'gd-label', '棋手昵称');
   const input = el('input', 'gd-input');
+  input.id = nameLabel.htmlFor = 'gd-rename';
   Object.assign(input, { type: 'text', maxLength: 12, value: current, required: true });
   input.setAttribute('aria-label', '昵称');
   const errorLine = el('div', 'gd-error');
+  errorLine.setAttribute('role', 'alert');
   const submit = el('button', 'gd-btn', '保存');
   submit.type = 'submit';
-  form.append(input, errorLine, submit);
+  form.append(nameLabel, input, errorLine, submit);
   form.onsubmit = async (event) => {
     event.preventDefault();
     submit.disabled = true;
