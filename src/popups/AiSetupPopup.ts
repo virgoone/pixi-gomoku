@@ -6,7 +6,7 @@ import { navigation } from '../app/navigation';
 import { getProfile, updateProfile } from '../app/storage';
 import { tex } from '../app/textures';
 import { BRAINS, type BrainId, type EngineState, masterEngine } from '../gomoku/ai';
-import { nextVariant, normalizeVariant, type Opening, type Variant, variantName } from '../gomoku/opening';
+import { DEFAULT_VARIANT, nextVariant, type Opening, type Variant, variantName } from '../gomoku/opening';
 import { BLACK, type Rule, WHITE } from '../gomoku/rules';
 import { Button } from '../ui/Button';
 import { label } from '../ui/Label';
@@ -32,7 +32,7 @@ export class AiSetupPopup extends BasePopup {
     const profile = getProfile();
     this.brain = profile.lastBrain;
     this.playFirst = profile.playFirst;
-    this.variant = normalizeVariant(profile.rule, profile.opening);
+    this.variant = DEFAULT_VARIANT;
 
     const cardWidth = 156;
     const cardHeight = 300;
@@ -87,7 +87,7 @@ export class AiSetupPopup extends BasePopup {
           return;
         }
         const { rule, opening } = this.variant;
-        updateProfile({ lastBrain: this.brain, playFirst: this.playFirst, rule, opening });
+        updateProfile({ lastBrain: this.brain, playFirst: this.playFirst });
         const brain = this.brain;
         const stone = this.playFirst ? BLACK : WHITE;
         void navigation.dismissPopup().then(() => this.onStart(brain, stone, rule, opening));

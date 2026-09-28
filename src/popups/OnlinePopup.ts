@@ -3,8 +3,8 @@ import gsap from 'gsap';
 
 import { sfx } from '../app/audio';
 import { navigation } from '../app/navigation';
-import { getProfile, updateProfile } from '../app/storage';
-import { nextVariant, normalizeVariant, type Variant, variantName } from '../gomoku/opening';
+import { getProfile } from '../app/storage';
+import { DEFAULT_VARIANT, nextVariant, type Variant, variantName } from '../gomoku/opening';
 import { BLACK, type Stone, WHITE } from '../gomoku/rules';
 import { agreedVariant, type HostedRoom, hostRoom, joinRoom, type OnlineLink } from '../net/online';
 import { Button } from '../ui/Button';
@@ -40,7 +40,7 @@ export class OnlinePopup extends BasePopup {
   private slots: Text[] = [];
   private status: Text | null = null;
   private joining = false;
-  private variant: Variant = normalizeVariant(getProfile().rule, getProfile().opening);
+  private variant: Variant = DEFAULT_VARIANT;
   private ruleButton: Button | null = null;
   private keyHandler = (event: KeyboardEvent) => this.onKey(event);
 
@@ -90,7 +90,6 @@ export class OnlinePopup extends BasePopup {
 
   private toggleRule() {
     this.variant = nextVariant(this.variant);
-    updateProfile({ rule: this.variant.rule, opening: this.variant.opening });
     this.ruleButton?.setText(this.ruleText());
   }
 

@@ -25,6 +25,9 @@ export const VARIANTS: Variant[] = [
 ];
 
 /** The RIF opening only exists with renju; anything else collapses to a free opening. */
+/** Every menu starts on free-style; renju and the RIF opening are opted into each time. */
+export const DEFAULT_VARIANT: Variant = VARIANTS[0];
+
 export function normalizeVariant(rule: Rule, opening: Opening | undefined): Variant {
   return { rule, opening: rule === 'renju' && opening === 'rif' ? 'rif' : 'free' };
 }

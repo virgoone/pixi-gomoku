@@ -111,7 +111,7 @@ export class RulesView extends Container {
       });
       y += rowH;
     });
-    const note = label('三种规则都是 15×15 棋盘、黑棋先下。在人机、同屏和在线房间里都能选，\n规则按钮会在这三种之间切换。', 'small', { fontSize: 13, fill: DIM, align: 'center', lineHeight: 20 });
+    const note = label('三种规则都是 15×15 棋盘、黑棋先下。默认无禁手；人机、同屏和在线房间里\n都能用规则按钮切换，每次开局前重新选择。', 'small', { fontSize: 13, fill: DIM, align: 'center', lineHeight: 20 });
     note.position.set(width / 2, y + 26);
     root.addChild(note);
     return y + 50;
@@ -144,7 +144,7 @@ export class RulesView extends Container {
       root.addChild(card);
       y += cy + 18;
     }
-    const note = label('三种规则都是15×15棋盘、黑棋先下；人机、同屏、在线都能选。', 'small', { fontSize: 13, fill: DIM, wordWrap: true, wordWrapWidth: width - 20, align: 'center', lineHeight: 19, breakWords: true });
+    const note = label('三种规则都是15×15棋盘、黑棋先下；默认无禁手，人机、同屏、在线每次开局前都可以改选。', 'small', { fontSize: 13, fill: DIM, wordWrap: true, wordWrapWidth: width - 20, align: 'center', lineHeight: 19, breakWords: true });
     note.position.set(width / 2, y + 12);
     root.addChild(note);
     return y + 12 + note.height;
