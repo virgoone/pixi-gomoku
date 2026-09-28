@@ -4,7 +4,9 @@ import gsap from 'gsap';
 import { tex } from '../app/textures';
 import { trackLeaderboardView } from '../app/analytics';
 import emptyBoardUrl from '../assets/leaderboard-empty.png';
-import { account, type ApiError, type Board, BoardFeed, type BoardEntry } from '../net/account';
+import { navigation } from '../app/navigation';
+import { account, type ApiError, type Board, BoardFeed, type BoardEntry, MASTER_ID } from '../net/account';
+import { MasterRecordPopup } from '../popups/MasterRecordPopup';
 import { INK } from '../svg/palette';
 import { openRename, openSignIn } from './authDialog';
 import { Button } from './Button';
@@ -221,15 +223,18 @@ export class LeaderboardView extends Container {
   private makeRow(entry: BoardEntry, rank: number, mine: boolean) {
     const width = this.w - 32;
     const row = new Container();
+    // The master (龙九段) is ranked like anyone, drawn in red with its avatar; tap for its record.
+    const master = entry.userId === MASTER_ID;
     const bg = new Graphics()
       .roundRect(0, 2, width, ROW_H - 6, 14)
-      .fill({ color: mine ? 0xffd84a : 0xffffff, alpha: mine ? 0.22 : rank % 2 ? 0.06 : 0.02 });
+      .fill({ color: mine ? 0xffd84a : master ? 0xff6b5a : 0xffffff, alpha: mine ? 0.22 : master ? 0.16 : rank % 2 ? 0.06 : 0.02 });
+    if (master) bg.roundRect(0, 2, width, ROW_H - 6, 14).stroke({ color: 0xff8a6a, width: 2, alpha: 0.7 });
     if (mine) bg.roundRect(0, 2, width, ROW_H - 6, 14).stroke({ color: 0xffd84a, width: 2, alpha: 0.8 });
     const medal = new Graphics().circle(0, 0, 15).fill(rank <= 3 ? MEDALS[rank - 1] : 0x2a1a4f).stroke({ color: INK, width: 3 });
     medal.position.set(24, ROW_H / 2 - 1);
     const rankText = label(String(rank), 'number', { fontSize: rank > 99 ? 12 : 16, fill: rank <= 3 ? INK : 0xffffff, stroke: rank <= 3 ? { color: 0xffffff, width: 0 } : { color: INK, width: 3 } });
     rankText.position.copyFrom(medal.position);
-    const name = label(entry.name + (mine ? '（我）' : ''), 'button', { fontSize: 18, stroke: { color: INK, width: 4, join: 'round' } });
+    const name = label(entry.name + (mine ? '（我）' : master ? ' · AI' : ''), 'button', { fontSize: 18, stroke: { color: INK, width: 4, join: 'round' } });
     name.anchor.set(0, 0.5);
     name.position.set(50, ROW_H / 2 - 1);
     const maxName = width - 230;
@@ -244,6 +249,16 @@ export class LeaderboardView extends Container {
     unit.anchor.set(1, 0.5);
     unit.position.set(width - 16, ROW_H / 2);
     row.addChild(bg, medal, rankText, name, record, points, unit);
+    if (master) {
+      const avatar = new Sprite(tex('avatar-master'));
+      avatar.anchor.set(0.5);
+      avatar.width = avatar.height = 26;
+      avatar.position.set(name.x + name.width + 18, ROW_H / 2 - 1);
+      row.addChild(avatar);
+      row.eventMode = 'static';
+      row.cursor = 'pointer';
+      row.on('pointertap', () => void navigation.present(new MasterRecordPopup(this.board?.master)));
+    }
     return row;
   }
 

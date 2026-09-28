@@ -24,13 +24,22 @@ export type Outcome = {
   moves?: Array<[number, number]>;
   /** The colour that resigned, when the game ended by resignation. */
   resignedBy?: Stone;
+  /** Some of the local player's moves were played by the master on their behalf (托管). */
+  delegated?: boolean;
+  /** The online opponent left and the master finished their side. */
+  masterTookOver?: boolean;
+  /** The online opponent used 托管 at some point. */
+  opponentDelegated?: boolean;
+  /** The player lets the master's public record name them (privacy setting). */
+  showName?: boolean;
 };
 
 export type Rewards = { coins: number; gems: number; crowns: number };
 
 export type Settlement =
-  | { kind: 'win'; tier: TierId; rewards: Rewards; headline: string; detail: string; streak: number }
-  | { kind: 'loss' | 'draw'; rewards: Rewards; headline: string; detail: string; streak: number };
+  | { kind: 'win'; tier: TierId; rewards: Rewards; headline: string; detail: string; streak: number; delegated?: false }
+  /** `delegated`: a 托管 game, shown with the draw badge, no rewards and no effect on the record. */
+  | { kind: 'loss' | 'draw'; rewards: Rewards; headline: string; detail: string; streak: number; delegated?: boolean };
 
 const CHEST_REWARDS: Record<TierId, Rewards> = {
   0: { coins: 60, gems: 0, crowns: 0 },
@@ -61,6 +70,12 @@ export function settle(outcome: Outcome, streakBefore: number): Settlement {
   const stoneName = (stone: Stone) => (stone === 1 ? '黑方' : '白方');
   const moves = `共 ${outcome.totalMoves} 手`;
   const how = outcome.reason === 'resign' ? '对手认输' : outcome.reason === 'disconnect' ? '对手离线' : `${outcome.winnerMoves} 步连成五子`;
+
+  // The master played for you: the game counts for the master, not for your record or rewards.
+  if (outcome.delegated && outcome.mode !== 'local') {
+    const result = outcome.winner === null ? '神龙和对手下成平局' : outcome.winner === outcome.myStone ? '神龙替你赢了' : '神龙替你输了';
+    return { kind: 'draw', delegated: true, rewards: { coins: 0, gems: 0, crowns: 0 }, headline: '托管局', detail: `${result} · ${moves} · 不计入战绩`, streak: streakBefore };
+  }
 
   if (outcome.winner === null) {
     return { kind: 'draw', rewards: { coins: 30, gems: 0, crowns: 0 }, headline: '平局', detail: `${moves} · 棋盘已满`, streak: streakBefore };

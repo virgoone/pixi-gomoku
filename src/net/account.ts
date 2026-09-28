@@ -10,7 +10,12 @@ import { ProfileSync } from './profileSync';
 
 export type PublicUser = { id: string; name: string; email: string; role: 'admin' | 'user' };
 export type BoardEntry = { userId: string; name: string; points: number; wins: number; losses: number; draws: number; bestStreak: number };
-export type Board = { version: number; updatedAt: number; entries: BoardEntry[] };
+/** The master (神龙棋仙, 龙九段 on the board) as a virtual player, from its side; see server/board.ts. */
+export type MasterGame = { kind: 'challenge' | 'takeover' | 'delegate'; result: 'win' | 'loss' | 'draw'; name: string | null; finishedAt: number };
+export type MasterRecord = { wins: number; losses: number; draws: number; points: number; streak: number; bestStreak: number; challenges: number; takeovers: number; delegated: number; recent: MasterGame[] };
+/** The master's entry id on the ranked board. */
+export const MASTER_ID = 'master';
+export type Board = { version: number; updatedAt: number; entries: BoardEntry[]; master?: MasterRecord };
 export type Player = { points: number; wins: number; losses: number; draws: number; streak: number; bestStreak: number };
 export type SubmitResult = { result: 'win' | 'loss' | 'draw'; points: number; rank: number | null; player: Player };
 

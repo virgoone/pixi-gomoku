@@ -10,6 +10,14 @@ export type QueuedGame = {
     myStone: 1 | 2;
     moves: Array<[number, number]>;
     resigned: 1 | 2 | null;
+    /** Moves were played by the master on the player's behalf (托管). */
+    delegated?: boolean;
+    /** The master finished a departed online opponent's side. */
+    takeover?: boolean;
+    /** The online opponent used 托管 too. */
+    opponentDelegated?: boolean;
+    /** Show the player's name in the master's record. */
+    showName?: boolean;
   };
   rejected?: string;
 };
@@ -57,6 +65,7 @@ export class ResultQueue {
       gameId, finishedAt: outcome.finishedAt ?? Date.now(), mode: outcome.mode,
       brain: outcome.brain, myStone: outcome.myStone, moves: outcome.moves,
       resigned: outcome.resignedBy ?? null,
+      delegated: outcome.delegated || undefined, takeover: outcome.masterTookOver || undefined, opponentDelegated: outcome.opponentDelegated || undefined, showName: outcome.showName || undefined,
     } });
     return gameId;
   }

@@ -211,6 +211,10 @@ export class ResultScreen extends Container {
         toast(this, account.user ? '成绩已保存在本机，联网后自动同步' : '成绩已保存在本机，查看排行榜时登录同步', this.w, this.ladderToastY);
         return;
       }
+      if (this.outcome.delegated) {
+        toast(this, '托管局不计入你的战绩，记在龙九段名下', this.w, this.ladderToastY);
+        return;
+      }
       const gained = result.points > 0 ? `排行榜 +${result.points} 分` : '成绩已记录';
       toast(this, result.rank ? `${gained} · 第 ${result.rank} 名` : gained, this.w, this.ladderToastY);
     });
@@ -218,7 +222,8 @@ export class ResultScreen extends Container {
 
   private recordStats() {
     const s = this.settlement;
-    if (this.outcome.mode === 'local') return;
+    // Same-device games and 托管 games leave the player's record alone.
+    if (this.outcome.mode === 'local' || s.delegated) return;
     updateProfile((profile) => ({
       wins: profile.wins + (s.kind === 'win' ? 1 : 0),
       losses: profile.losses + (s.kind === 'loss' ? 1 : 0),
@@ -505,7 +510,7 @@ export class ResultScreen extends Container {
   private async playBadge() {
     const badge = this.badge;
     if (!badge) return;
-    this.eyebrow.text = this.settlement.kind === 'draw' ? '势均力敌' : '再接再厉';
+    this.eyebrow.text = this.settlement.delegated ? '神龙代打' : this.settlement.kind === 'draw' ? '势均力敌' : '再接再厉';
     void this.popText(this.eyebrow);
     void this.setHeading(this.settlement.headline, 0xffffff);
     badge.y = -this.h;
@@ -521,6 +526,11 @@ export class ResultScreen extends Container {
       .to(badge, { rotation: 0, duration: 0.7, ease: 'sine.out' });
     await wait(0.3);
     if (this.destroyed) return;
+    // Nothing to collect (a 托管 game): straight to the next-step buttons.
+    if (!Object.values(this.settlement.rewards).some((amount) => amount > 0)) {
+      this.showNextButtons();
+      return;
+    }
     await this.showRewards(badge.toGlobal({ x: 0, y: -120 }));
     if (this.destroyed) return;
     this.showCollect();

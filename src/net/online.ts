@@ -14,12 +14,22 @@ const PREFIX = 'pixi-gomoku-v1-';
 /**
  * 1: first release. 2: `start` carries the rule (renju rooms).
  * 3: `start` carries the opening; swap / offer / choose messages for the RIF opening.
+ * 4: `delegate` tells the opponent a player handed their seat to the master (托管);
+ *    undo is a handshake: request → reply → commit (or cancel), so both sides
+ *    take back the same moves or neither does.
  */
-export const PROTOCOL = 3;
+export const PROTOCOL = 4;
 /** Oldest protocol that understands renju rooms. */
 export const RENJU_PROTOCOL = 2;
 /** Oldest protocol that understands the RIF opening. */
 export const OPENING_PROTOCOL = 3;
+/**
+ * Oldest protocol that shows a 托管 notice. Handing a seat to the master is
+ * only allowed when the opponent will see it.
+ */
+export const DELEGATE_PROTOCOL = 4;
+/** Oldest protocol that answers undo requests. */
+export const UNDO_PROTOCOL = 4;
 const PING_MS = 5000;
 // Generous: background tabs throttle timers heavily; real disconnects arrive via the close event.
 const TIMEOUT_MS = 90000;
@@ -33,6 +43,16 @@ export type NetMessage =
   | { type: 'offer'; points: Array<[number, number]> }
   /** RIF opening: the 5th move white keeps. */
   | { type: 'choose'; x: number; y: number }
+  /** The sender's moves are now (or no longer) played by the master. */
+  | { type: 'delegate'; on: boolean }
+  /** Ask to take back `count` moves from a game that is `index` moves long. */
+  | { type: 'undo-request'; count: 1 | 2; index: number }
+  /** The answer to the request for a game `index` moves long (so a stale answer cannot match a newer request). */
+  | { type: 'undo-reply'; accept: boolean; index: number }
+  /** The requester saw the acceptance and took the moves back: the accepter does the same now. */
+  | { type: 'undo-commit'; index: number }
+  /** The requester gave up waiting: an acceptance still in flight must not be acted on. */
+  | { type: 'undo-cancel'; index: number }
   | { type: 'move'; x: number; y: number; index: number }
   | { type: 'resign' }
   | { type: 'rematch' }
@@ -71,6 +91,15 @@ export function parseMessage(data: unknown): NetMessage | null {
       const valid = points.every((p) => Array.isArray(p) && p.length === 2 && isInt(p[0], 0, 14) && isInt(p[1], 0, 14));
       return valid ? { type: 'offer', points: points.map((p) => [p[0], p[1]] as [number, number]) } : null;
     }
+    case 'undo-request':
+      return (m.count === 1 || m.count === 2) && isInt(m.index, 1, 225) ? { type: 'undo-request', count: m.count, index: m.index as number } : null;
+    case 'undo-reply':
+      return typeof m.accept === 'boolean' && isInt(m.index, 1, 225) ? { type: 'undo-reply', accept: m.accept, index: m.index as number } : null;
+    case 'undo-commit':
+    case 'undo-cancel':
+      return isInt(m.index, 1, 225) ? { type: m.type, index: m.index as number } : null;
+    case 'delegate':
+      return typeof m.on === 'boolean' ? { type: 'delegate', on: m.on } : null;
     case 'choose':
       return isInt(m.x, 0, 14) && isInt(m.y, 0, 14) ? { type: 'choose', x: m.x as number, y: m.y as number } : null;
     case 'move':

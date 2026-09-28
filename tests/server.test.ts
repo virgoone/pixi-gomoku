@@ -193,6 +193,77 @@ describe('leaderboard', () => {
     expect(a2.player).toMatchObject({ losses: 1, streak: 0, bestStreak: 1 });
   });
 
+  it('gives a 托管 game to the master, not the player, and never master against master', async () => {
+    const env = makeEnv();
+    const alice = (await signIn(env, 'alice@example.com', 'Alice')).user;
+    const t0 = Date.now();
+    const gameId = crypto.randomUUID();
+    const won = await submitGame(env.board, alice, { gameId, mode: 'online', myStone: 1, moves: BLACK_FIVE, delegated: true, showName: true }, t0);
+    expect(won).toMatchObject({ result: 'win', points: 0, duplicate: false });
+    expect(won.player).toMatchObject({ points: 0, wins: 0, losses: 0, streak: 0 });
+    const board = await readBoard(env.board);
+    expect(board.master).toMatchObject({ wins: 1, points: 10, delegated: 1 });
+    expect(board.master?.recent[0]).toMatchObject({ kind: 'delegate', result: 'win', name: 'Alice' });
+    const again = await submitGame(env.board, alice, { gameId, mode: 'online', myStone: 1, moves: BLACK_FIVE, delegated: true }, t0 + SUBMIT_INTERVAL_MS);
+    expect(again).toMatchObject({ duplicate: true });
+    // Both sides on 托管, or 托管 against a taken-over opponent: the master played itself.
+    await submitGame(env.board, alice, { mode: 'online', myStone: 1, moves: BLACK_FIVE, delegated: true, opponentDelegated: true }, t0 + 2 * SUBMIT_INTERVAL_MS);
+    await submitGame(env.board, alice, { mode: 'online', myStone: 1, moves: BLACK_FIVE, delegated: true, takeover: true }, t0 + 3 * SUBMIT_INTERVAL_MS);
+    expect((await readBoard(env.board)).master).toMatchObject({ wins: 1, delegated: 1 });
+    expect((await readBoard(env.board)).entries.find((e) => e.userId === alice.id)).toMatchObject({ points: 0, wins: 0 });
+  });
+
+  it('ranks the master (龙九段) by its games against people, hiding names by default', async () => {
+    const env = makeEnv();
+    const bob = (await signIn(env, 'bob@example.com', 'Bob')).user;
+    const t0 = Date.now();
+    // Bob (white) loses to the master: +10 for the master, a loss for Bob.
+    const lost = await submitGame(env.board, bob, { mode: 'ai', brain: 'master', myStone: 2, moves: BLACK_FIVE }, t0);
+    expect(lost.player).toMatchObject({ losses: 1 });
+    expect(lost.rank).toBe(2);
+    // The master took over Bob's departed online opponent and lost: Bob gets online points.
+    const beat = await submitGame(env.board, bob, { mode: 'online', myStone: 1, moves: BLACK_FIVE, takeover: true, showName: true }, t0 + SUBMIT_INTERVAL_MS);
+    expect(beat).toMatchObject({ result: 'win', points: 5 });
+    const board = await readBoard(env.board);
+    expect(board.master).toMatchObject({ wins: 1, losses: 1, points: 10, challenges: 1, takeovers: 1 });
+    expect(board.master?.recent.map((g) => [g.kind, g.result, g.name])).toEqual([['takeover', 'loss', 'Bob'], ['challenge', 'win', null]]);
+    expect(board.entries.map((e) => [e.name, e.points])).toEqual([['龙九段', 10], ['Bob', 5]]);
+    // Other games leave the master alone, and publishing players keeps its entry.
+    await submitGame(env.board, bob, { mode: 'ai', brain: 'fox', myStone: 1, moves: BLACK_FIVE }, t0 + 2 * SUBMIT_INTERVAL_MS);
+    const after = await readBoard(env.board);
+    expect(after.master).toMatchObject({ wins: 1, losses: 1 });
+    expect(after.entries.map((e) => [e.name, e.points])).toEqual([['龙九段', 10], ['Bob', 8]]);
+  });
+
+  it('credits the master once per game, even across failures and duplicate submissions', async () => {
+    const env = makeEnv();
+    const alice = (await signIn(env, 'alice@example.com', 'Alice')).user;
+    const t0 = Date.now();
+    const body = { gameId: crypto.randomUUID(), mode: 'ai', brain: 'master', myStone: 2, moves: BLACK_FIVE };
+    await Promise.all(Array.from({ length: 5 }, () => submitGame(env.board, alice, body, t0)));
+    expect((await readBoard(env.board)).master).toMatchObject({ challenges: 1, wins: 1 });
+
+    // The master's update fails once: the retry (a duplicate for the player) finishes it.
+    const kv = env.board as MemoryKV;
+    const realSet = kv.set.bind(kv);
+    let failed = false;
+    kv.set = async (key, value, options) => {
+      if (key === 'board' && !failed && (value as { master?: { challenges: number } }).master?.challenges === 2) {
+        failed = true;
+        throw new Error('connection lost');
+      }
+      return realSet(key, value, options);
+    };
+    const second = { ...body, gameId: crypto.randomUUID() };
+    await expect(submitGame(env.board, alice, second, t0 + SUBMIT_INTERVAL_MS)).rejects.toThrow('connection lost');
+    expect((await readBoard(env.board)).master).toMatchObject({ challenges: 1 });
+    const retry = await submitGame(env.board, alice, second, t0 + 2 * SUBMIT_INTERVAL_MS);
+    expect(retry).toMatchObject({ duplicate: true });
+    expect((await readBoard(env.board)).master).toMatchObject({ challenges: 2, wins: 2, points: 20 });
+    await submitGame(env.board, alice, second, t0 + 3 * SUBMIT_INTERVAL_MS);
+    expect((await readBoard(env.board)).master).toMatchObject({ challenges: 2 });
+  });
+
   it('keeps every player when many submit at once', async () => {
     const env = makeEnv();
     const users = await Promise.all(Array.from({ length: 12 }, (_, i) => signIn(env, `p${i}@example.com`, `P${i}`)));
