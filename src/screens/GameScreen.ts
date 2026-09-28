@@ -37,6 +37,9 @@ type Seat = 'human' | 'ai' | 'remote';
 
 const stoneName = (stone: Stone) => (stone === BLACK ? '黑棋' : '白棋');
 
+/** How long an online undo request waits for an answer before it is withdrawn. */
+const UNDO_WAIT_MS = 30_000;
+
 export class GameScreen extends Container {
   private backdrop = new Backdrop('backdrop-game', { raysTint: 0xb9a0ff, sparkles: 12 });
   private boardGlow = new Sprite(tex('glow'));
@@ -71,10 +74,17 @@ export class GameScreen extends Container {
   private readonly wasOnline: boolean;
   /** The online opponent left and the master finished their side: the game still counts as online. */
   private takeover: { opponentName: string } | null = null;
-  /** The online opponent handed their seat to the master. */
+  /** The online opponent handed their seat to the master (now / at some point this game). */
   private opponentDelegating = false;
-  /** Online: our undo request waiting for the opponent's answer. */
-  private undoRequest: { count: 1 | 2; index: number } | null = null;
+  private opponentEverDelegated = false;
+  /** Online: our undo request waiting for the opponent's answer (gives up after UNDO_WAIT_MS). */
+  private undoRequest: { count: 1 | 2; index: number; timer: number } | null = null;
+  /**
+   * Online: the opponent's undo request we are answering. Once accepted we wait
+   * for their commit (or cancel) before touching the board, so both sides take
+   * back the same moves or neither does.
+   */
+  private undoAnswer: { count: 1 | 2; index: number; accepted: boolean; popup: ConfirmPopup } | null = null;
   /** Widest the status line may be; longer texts shrink to fit. */
   private statusMaxWidth = 280;
   /** RIF opening (renju only) and its decisions so far. */
@@ -214,7 +224,8 @@ export class GameScreen extends Container {
     return this.game.turn;
   }
 
-  private nextTurn() {
+  /** Refresh the view for whoever acts next; `act` also starts the AI or asks the swap question. */
+  private nextTurn(act = true) {
     if (this.ended) return;
     this.board.hideGhost();
     const phase = this.phase();
@@ -222,8 +233,8 @@ export class GameScreen extends Container {
     const seat = this.seatOf(actor);
     const mine = seat === 'human';
     this.board.turnStone = this.game.turn;
-    // No moves while our undo request waits for an answer.
-    this.board.acceptingInput = mine && phase !== 'swap' && !this.undoRequest;
+    // No moves while an undo request (ours or theirs) is being settled.
+    this.board.acceptingInput = mine && phase !== 'swap' && !this.undoRequest && !this.undoAnswer?.accepted;
     this.board.ghostEnabled = phase !== 'choose';
     this.board.setForbidden(mine && this.game.rule === 'renju' && this.game.turn === BLACK && (phase === 'play' || phase === 'offer') ? forbiddenPoints(this.game.board) : []);
     this.board.setZone(mine && phase === 'place' ? openingRadius(this.game.history.length) : null);
@@ -235,6 +246,7 @@ export class GameScreen extends Container {
     gsap.fromTo(this.status, { alpha: 0.3 }, { alpha: 1, duration: 0.3 });
     this.undoButton.setEnabled(this.canUndo());
     this.resignButton.setEnabled(!this.ended && (this.config.mode === 'local' || this.game.history.length > 0));
+    if (!act) return;
     if (seat === 'ai') void (phase === 'play' ? this.aiTurn() : this.aiOpening(phase));
     else if (mine && phase === 'swap') this.askSwap();
   }
@@ -458,6 +470,11 @@ export class GameScreen extends Container {
       this.setDelegating(false);
       return;
     }
+    // The master's move would race the opponent's answer to our undo request.
+    if (this.undoRequest) {
+      toast(this, '正在等待对方回复悔棋，稍后再托管', this.w);
+      return;
+    }
     // Only when the opponent's client will show it: a hidden 托管 would be cheating.
     if (config.mode === 'online' && config.link.opponentProtocol < DELEGATE_PROTOCOL) {
       toast(this, '对方的版本还看不到托管标记，暂时不能托管', this.w);
@@ -530,7 +547,7 @@ export class GameScreen extends Container {
   }
 
   private canUndo() {
-    if (this.ended || this.aiThinking || this.undoRequest || this.delegating) return false;
+    if (this.ended || this.aiThinking || this.undoRequest || this.undoAnswer || this.delegating) return false;
     // The RIF opening cannot be taken back: only moves after the kept 5th move can.
     if (this.opening === 'rif' && (this.phase() !== 'play' || this.game.history.length - this.undoCount() < 5)) return false;
     const config = this.config;
@@ -551,8 +568,17 @@ export class GameScreen extends Container {
     if (!this.canUndo()) return;
     const config = this.config;
     if (config.mode === 'online') {
-      this.undoRequest = { count: this.undoCount(), index: this.game.history.length };
-      config.link.send({ type: 'undo-request', ...this.undoRequest });
+      const request = { count: this.undoCount(), index: this.game.history.length };
+      // Nobody answering must not freeze the game: give up, and tell the opponent so.
+      const timer = window.setTimeout(() => {
+        if (this.undoRequest?.index !== request.index || this.destroyed) return;
+        config.link.send({ type: 'undo-cancel', index: request.index });
+        this.closeUndoRequest();
+        toast(this, '对方没有回应，悔棋已取消', this.w);
+        this.nextTurn();
+      }, UNDO_WAIT_MS);
+      this.undoRequest = { ...request, timer };
+      config.link.send({ type: 'undo-request', ...request });
       this.undoButton.setText('等待同意…');
       toast(this, '已请求悔棋，等待对方同意', this.w);
       this.nextTurn();
@@ -572,6 +598,7 @@ export class GameScreen extends Container {
 
   /** Our request was answered, or went stale because the board changed. */
   private closeUndoRequest() {
+    if (this.undoRequest) window.clearTimeout(this.undoRequest.timer);
     this.undoRequest = null;
     this.undoButton.setText('悔棋');
   }
@@ -581,40 +608,74 @@ export class GameScreen extends Container {
     const config = this.config;
     if (config.mode !== 'online') return;
     const valid = () => !this.ended && this.game.history.length === index && !(this.opening === 'rif' && (this.phase() !== 'play' || index - count < 5));
-    if (!valid()) {
-      config.link.send({ type: 'undo-reply', accept: false });
+    // Refuse while our own request is open (both accepting would take back different moves on
+    // each side) and under 托管 (the player may be away; the requester would wait forever).
+    if (!valid() || this.undoRequest || this.delegating) {
+      config.link.send({ type: 'undo-reply', accept: false, index });
       return;
     }
     this.board.hideGhost();
     const answer = (accept: boolean) => {
+      // Cancelled meanwhile (the requester gave up): nothing to answer.
+      if (this.undoAnswer?.index !== index) return;
       // The board may have changed while the question was open.
-      const ok = accept && valid();
-      config.link.send({ type: 'undo-reply', accept: ok });
+      const ok = accept && valid() && !this.undoRequest;
+      config.link.send({ type: 'undo-reply', accept: ok, index });
       if (ok) {
-        toast(this, `已同意悔棋，撤回 ${count} 手`, this.w);
-        this.takeBack(count);
+        // Take the moves back only on the requester's commit.
+        this.undoAnswer.accepted = true;
+        this.nextTurn();
+      } else {
+        this.undoAnswer = null;
       }
     };
-    void navigation.present(
-      new ConfirmPopup({
-        title: '对方请求悔棋',
-        message: `${config.link.opponentName}想撤回 ${count} 手棋，同意吗？`,
-        confirm: '同意',
-        cancel: '拒绝',
-        onConfirm: () => answer(true),
-        onCancel: () => answer(false),
-      }),
-    );
+    const popup = new ConfirmPopup({
+      title: '对方请求悔棋',
+      message: `${config.link.opponentName}想撤回 ${count} 手棋，同意吗？`,
+      confirm: '同意',
+      cancel: '拒绝',
+      onConfirm: () => answer(true),
+      onCancel: () => answer(false),
+    });
+    this.undoAnswer = { count, index, accepted: false, popup };
+    void navigation.present(popup);
   }
 
-  private onUndoReply(accept: boolean) {
+  /** The requester took the moves back after our acceptance: do the same. */
+  private onUndoCommit(index: number) {
+    const answer = this.undoAnswer;
+    if (!answer || answer.index !== index || !answer.accepted) return;
+    this.undoAnswer = null;
+    if (this.game.history.length !== index) return;
+    toast(this, `已悔棋，撤回 ${answer.count} 手`, this.w);
+    this.takeBack(answer.count);
+  }
+
+  /** The requester gave up waiting: close the question and free the board. */
+  private onUndoCancel(index: number) {
+    const answer = this.undoAnswer;
+    if (!answer || answer.index !== index) return;
+    this.undoAnswer = null;
+    if (navigation.popup === answer.popup) void navigation.dismissPopup();
+    toast(this, '对方取消了悔棋请求', this.w);
+    this.nextTurn();
+  }
+
+  private onUndoReply(accept: boolean, index: number) {
     const request = this.undoRequest;
-    if (!request) return;
+    // A late answer to an earlier (already stale) request must not settle the current one.
+    if (!request || request.index !== index) return;
     this.closeUndoRequest();
     if (accept && this.game.history.length === request.index) {
+      // Commit first: the accepter takes the same moves back when it arrives.
+      const config = this.config;
+      if (config.mode === 'online') config.link.send({ type: 'undo-commit', index });
       toast(this, '对方同意了悔棋', this.w);
       this.takeBack(request.count);
     } else {
+      // An acceptance we will not act on: release the accepter, who is waiting for a commit.
+      const config = this.config;
+      if (accept && config.mode === 'online') config.link.send({ type: 'undo-cancel', index });
       toast(this, accept ? '棋局已变化，悔棋作废' : '对方拒绝了悔棋', this.w);
       this.nextTurn();
     }
@@ -688,6 +749,8 @@ export class GameScreen extends Container {
       moves: this.game.history.map((move) => [move.x, move.y] as [number, number]),
       resignedBy: reason === 'resign' && winner !== null ? opponent(winner) : undefined,
       delegated: this.everDelegated || undefined,
+      masterTookOver: this.takeover ? true : undefined,
+      opponentDelegated: this.opponentEverDelegated || undefined,
       showName: getProfile().showInMasterRecord || undefined,
     };
     trackGameEnd(outcome);
@@ -737,14 +800,20 @@ export class GameScreen extends Container {
           if (theirTurn && phase === 'choose') this.keepOffer({ x: message.x, y: message.y }, false);
         } else if (message.type === 'undo-request') {
           this.onUndoRequest(message.count, message.index);
+        } else if (message.type === 'undo-commit') {
+          this.onUndoCommit(message.index);
+        } else if (message.type === 'undo-cancel') {
+          this.onUndoCancel(message.index);
         } else if (message.type === 'undo-reply') {
-          this.onUndoReply(message.accept);
+          this.onUndoReply(message.accept, message.index);
         } else if (message.type === 'delegate') {
           if (message.on === this.opponentDelegating) return;
           this.opponentDelegating = message.on;
+          if (message.on) this.opponentEverDelegated = true;
           toast(this, `${this.config.link.opponentName}${message.on ? '把这局托管给了神龙' : '取消了托管'}`, this.w);
           this.setupPlayers();
-          this.nextTurn();
+          // Only redraw the turn: re-acting would reopen the swap question or restart our 托管's search.
+          this.nextTurn(false);
         } else if (message.type === 'resign') {
           this.resignAs(theirs);
         }

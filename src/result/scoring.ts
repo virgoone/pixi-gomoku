@@ -26,6 +26,10 @@ export type Outcome = {
   resignedBy?: Stone;
   /** Some of the local player's moves were played by the master on their behalf (托管). */
   delegated?: boolean;
+  /** The online opponent left and the master finished their side. */
+  masterTookOver?: boolean;
+  /** The online opponent used 托管 at some point. */
+  opponentDelegated?: boolean;
   /** The player lets the master's public record name them (privacy setting). */
   showName?: boolean;
 };

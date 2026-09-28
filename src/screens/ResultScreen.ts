@@ -212,7 +212,7 @@ export class ResultScreen extends Container {
         return;
       }
       if (this.outcome.delegated) {
-        toast(this, '托管局已记入神龙棋仙的战绩', this.w, this.ladderToastY);
+        toast(this, '托管局不计入你的战绩，记在龙九段名下', this.w, this.ladderToastY);
         return;
       }
       const gained = result.points > 0 ? `排行榜 +${result.points} 分` : '成绩已记录';

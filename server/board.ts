@@ -1,6 +1,6 @@
 import { BRAINS, type BrainId } from '../src/gomoku/ai/brains';
 import { BLACK, BOARD_SIZE, GomokuGame, opponent, type Stone, WHITE } from '../src/gomoku/rules';
-import { ladderPoints } from '../src/result/ladder';
+import { LADDER_POINTS, ladderPoints } from '../src/result/ladder';
 import type { CloudProgress } from '../src/profile/progress';
 import type { User } from './auth';
 import type { KV } from './kv';
@@ -37,14 +37,31 @@ export type Player = {
 
 export type BoardEntry = Pick<Player, 'userId' | 'name' | 'points' | 'wins' | 'losses' | 'draws' | 'bestStreak'>;
 /** One game in the master's public record, from the master's side. */
-export type MasterGame = { kind: 'challenge' | 'delegate'; result: 'win' | 'loss' | 'draw'; name: string | null; finishedAt: number };
+export type MasterGame = { kind: 'challenge' | 'takeover' | 'delegate'; result: 'win' | 'loss' | 'draw'; name: string | null; finishedAt: number };
 /**
- * The master (神龙棋仙) as a virtual player: its results against people who
- * challenged it, and the games it played for people who handed their seat to
- * it (托管). Kept on the board document so the board's version covers it.
+ * The master (神龙棋仙, on the board as 龙九段) as a virtual player: every game
+ * it plays against a person, whether they challenged it, it took over a
+ * departed online opponent, or it played for someone under 托管 (the delegator
+ * gets nothing; their opponent keeps their own online result). Master against
+ * master counts for nobody. Kept on the board document (plus a ranked entry) so
+ * the board's version covers it.
  */
-export type MasterRecord = { wins: number; losses: number; draws: number; challenges: number; delegated: number; recent: MasterGame[] };
+export type MasterRecord = {
+  wins: number;
+  losses: number;
+  draws: number;
+  points: number;
+  streak: number;
+  bestStreak: number;
+  challenges: number;
+  takeovers: number;
+  delegated: number;
+  recent: MasterGame[];
+};
 export const MASTER_RECENT = 10;
+/** The master's entry on the ranked board; not a real user id (those are 24 hex digits). */
+export const MASTER_ID = 'master';
+export const MASTER_NAME = '龙九段';
 export type Board = { version: number; updatedAt: number; entries: BoardEntry[]; master?: MasterRecord };
 
 export type GameSubmission = {
@@ -54,8 +71,12 @@ export type GameSubmission = {
   moves: Array<[number, number]>;
   /** Which colour resigned, if the game ended by resignation. */
   resigned?: Stone | null;
-  /** The master played (some of) the player's moves: the game is the master's, not theirs. */
+  /** The master played (some of) the player's moves (托管): the game is the master's, not the player's. */
   delegated?: boolean;
+  /** The online opponent used 托管 too, so the master would be playing itself. */
+  opponentDelegated?: boolean;
+  /** The online opponent left and the master finished their side. */
+  takeover?: boolean;
   /** The player lets the master's record show their name. */
   showName?: boolean;
 };
@@ -93,7 +114,7 @@ export function parseSubmission(body: unknown): GameSubmission & { gameId: strin
     }
     clean.push([move[0], move[1]]);
   }
-  return { mode, brain, myStone, moves: clean, resigned, gameId: b.gameId, finishedAt: b.finishedAt, delegated: b.delegated === true, showName: b.showName === true };
+  return { mode, brain, myStone, moves: clean, resigned, gameId: b.gameId, finishedAt: b.finishedAt, delegated: b.delegated === true, takeover: b.takeover === true, opponentDelegated: b.opponentDelegated === true, showName: b.showName === true };
 }
 
 /** Replay the game with the real rules and decide the player's result. */
@@ -239,7 +260,10 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
     if (receipt) {
       // Also repairs the public board if a previous request saved the player
       // but lost its connection before publishing the board or returning a reply.
-      const board = await publishPlayer(kv, user.id, now);
+      let board = await publishPlayer(kv, user.id, now);
+      // ...and the master's record, if that update failed last time.
+      const masterGame = masterGameOf(game, receipt.result, user.name, receipt.finishedAt);
+      if (masterGame) board = (await creditMaster(kv, game.gameId, masterGame, now)) ?? board;
       return { result: receipt.result, points: receipt.points, duplicate: true, player: publicPlayer(await withAccountProgress(kv, player)), rank: rankOf(board, user.id), version: board.version };
     }
     if (now - player.lastSubmitAt < SUBMIT_INTERVAL_MS) throw new BoardError(429, 'too_fast', '提交太频繁，稍后再试');
@@ -267,7 +291,7 @@ export async function submitGame(kv: KV, user: User, body: unknown, now = Date.n
     if (!written) continue;
     let board = await publishPlayer(kv, user.id, now);
     const masterGame = masterGameOf(game, result, user.name, Math.min(game.finishedAt, now));
-    if (masterGame) board = await recordMaster(kv, masterGame, now);
+    if (masterGame) board = (await creditMaster(kv, game.gameId, masterGame, now)) ?? board;
     return { result, points, duplicate: false, player: publicPlayer(await withAccountProgress(kv, next)), rank: rankOf(board, user.id), version: board.version };
   }
   throw new BoardError(503, 'busy', '请稍后再试');
@@ -278,27 +302,58 @@ const flip = { win: 'loss', loss: 'win', draw: 'draw' } as const;
 /** The game as the master's record sees it, if the master took part. */
 export function masterGameOf(game: GameSubmission, result: 'win' | 'loss' | 'draw', name: string, finishedAt: number): MasterGame | null {
   const shown = game.showName ? name : null;
-  // 托管: the master played the player's side, so their result is its result.
+  // The master on both sides (both 托管, or 托管 against a taken-over opponent) counts for nobody.
+  if (game.delegated && (game.opponentDelegated || game.takeover)) return null;
+  // 托管: the master played this player's side, so their result is its result. Only the
+  // delegator's submission credits it; the opponent's own submission is an ordinary online game.
   if (game.delegated) return { kind: 'delegate', result, name: shown, finishedAt };
   // A challenge: the player beat (or lost to) the master.
   if (game.mode === 'ai' && game.brain === 'master') return { kind: 'challenge', result: flip[result], name: shown, finishedAt };
+  // The master finished a departed online opponent's side against this player.
+  // (A departed opponent never submits, so this cannot double-count their own 托管.)
+  if (game.mode === 'online' && game.takeover) return { kind: 'takeover', result: flip[result], name: shown, finishedAt };
   return null;
+}
+
+/**
+ * Add a game to the master's record exactly once per game id, even across
+ * retries and concurrent duplicate submissions: a marker is claimed first and
+ * released again if the record could not be updated, so a retry can finish it.
+ * Returns null if the game was already credited.
+ */
+async function creditMaster(kv: KV, gameId: string, entry: MasterGame, now: number): Promise<Board | null> {
+  const marker = `master-games/${gameId}`;
+  if (!(await kv.set(marker, { at: now }, { onlyIfNew: true }))) return null;
+  try {
+    return await recordMaster(kv, entry, now);
+  } catch (error) {
+    await kv.delete(marker);
+    throw error;
+  }
 }
 
 async function recordMaster(kv: KV, entry: MasterGame, now: number): Promise<Board> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const current = await kv.get<Board>('board');
     const board = current?.value ?? { version: 0, updatedAt: 0, entries: [] };
-    const record = board.master ?? { wins: 0, losses: 0, draws: 0, challenges: 0, delegated: 0, recent: [] };
+    const record: MasterRecord = { wins: 0, losses: 0, draws: 0, points: 0, streak: 0, bestStreak: 0, challenges: 0, takeovers: 0, delegated: 0, recent: [], ...board.master };
+    const streak = entry.result === 'win' ? record.streak + 1 : entry.result === 'loss' ? 0 : record.streak;
     const master: MasterRecord = {
       wins: record.wins + (entry.result === 'win' ? 1 : 0),
       losses: record.losses + (entry.result === 'loss' ? 1 : 0),
       draws: record.draws + (entry.result === 'draw' ? 1 : 0),
+      // Scored like the players it meets: a win is worth what beating it is worth.
+      points: record.points + (entry.result === 'win' ? LADDER_POINTS.ai.master : entry.result === 'draw' ? LADDER_POINTS.draw : 0),
+      streak,
+      bestStreak: Math.max(record.bestStreak, streak),
       challenges: record.challenges + (entry.kind === 'challenge' ? 1 : 0),
+      takeovers: record.takeovers + (entry.kind === 'takeover' ? 1 : 0),
       delegated: record.delegated + (entry.kind === 'delegate' ? 1 : 0),
       recent: [entry, ...record.recent].slice(0, MASTER_RECENT),
     };
-    const next: Board = { ...board, version: board.version + 1, updatedAt: now, master };
+    const row: BoardEntry = { userId: MASTER_ID, name: MASTER_NAME, points: master.points, wins: master.wins, losses: master.losses, draws: master.draws, bestStreak: master.bestStreak };
+    const entries = rankEntries([...board.entries.filter((e) => e.userId !== MASTER_ID), row]);
+    const next: Board = { ...board, version: board.version + 1, updatedAt: now, entries, master };
     const written = current ? await kv.set('board', next, { onlyIfMatch: current.etag }) : await kv.set('board', next, { onlyIfNew: true });
     if (written) return next;
     await new Promise((resolve) => setTimeout(resolve, 20 + Math.random() * 60 * (attempt + 1)));

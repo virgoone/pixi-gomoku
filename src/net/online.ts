@@ -15,7 +15,8 @@ const PREFIX = 'pixi-gomoku-v1-';
  * 1: first release. 2: `start` carries the rule (renju rooms).
  * 3: `start` carries the opening; swap / offer / choose messages for the RIF opening.
  * 4: `delegate` tells the opponent a player handed their seat to the master (托管);
- *    `undo-request` / `undo-reply` take back moves when both players agree.
+ *    undo is a handshake: request → reply → commit (or cancel), so both sides
+ *    take back the same moves or neither does.
  */
 export const PROTOCOL = 4;
 /** Oldest protocol that understands renju rooms. */
@@ -46,7 +47,12 @@ export type NetMessage =
   | { type: 'delegate'; on: boolean }
   /** Ask to take back `count` moves from a game that is `index` moves long. */
   | { type: 'undo-request'; count: 1 | 2; index: number }
-  | { type: 'undo-reply'; accept: boolean }
+  /** The answer to the request for a game `index` moves long (so a stale answer cannot match a newer request). */
+  | { type: 'undo-reply'; accept: boolean; index: number }
+  /** The requester saw the acceptance and took the moves back: the accepter does the same now. */
+  | { type: 'undo-commit'; index: number }
+  /** The requester gave up waiting: an acceptance still in flight must not be acted on. */
+  | { type: 'undo-cancel'; index: number }
   | { type: 'move'; x: number; y: number; index: number }
   | { type: 'resign' }
   | { type: 'rematch' }
@@ -88,7 +94,10 @@ export function parseMessage(data: unknown): NetMessage | null {
     case 'undo-request':
       return (m.count === 1 || m.count === 2) && isInt(m.index, 1, 225) ? { type: 'undo-request', count: m.count, index: m.index as number } : null;
     case 'undo-reply':
-      return typeof m.accept === 'boolean' ? { type: 'undo-reply', accept: m.accept } : null;
+      return typeof m.accept === 'boolean' && isInt(m.index, 1, 225) ? { type: 'undo-reply', accept: m.accept, index: m.index as number } : null;
+    case 'undo-commit':
+    case 'undo-cancel':
+      return isInt(m.index, 1, 225) ? { type: m.type, index: m.index as number } : null;
     case 'delegate':
       return typeof m.on === 'boolean' ? { type: 'delegate', on: m.on } : null;
     case 'choose':
