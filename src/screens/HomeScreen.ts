@@ -173,11 +173,14 @@ export class HomeScreen extends Container {
     this.tabs.position.set(12, 12);
     this.sound.scale.set(barScale);
     this.sound.position.set(width - 12 - 24 * barScale, 12 + 28 * barScale);
-    const hudScale = narrow ? Math.min(1, (width - 24) / (this.hud.totalWidth + 8)) : barScale;
+    // Stack the HUD under the tabs on phones, and whenever it would run into the tab bar.
+    const hudRight = width - 12 - 56 * barScale - this.hud.totalWidth * barScale;
+    const stackHud = narrow || 12 + (this.tabs.barWidth + 8) * barScale > hudRight;
+    const hudScale = stackHud ? Math.min(1, (width - 24) / (this.hud.totalWidth + 8)) : barScale;
     this.hud.scale.set(hudScale);
-    if (narrow) this.hud.position.set((width - this.hud.totalWidth * hudScale) / 2, 12 + (this.tabs.barHeight + 10) * barScale);
-    else this.hud.position.set(width - 12 - 56 * barScale - this.hud.totalWidth * hudScale, 12 + 8 * barScale);
-    const topBottom = narrow ? this.hud.y + 40 * hudScale : 12 + this.tabs.barHeight * barScale;
+    if (stackHud) this.hud.position.set((width - this.hud.totalWidth * hudScale) / 2, 12 + (this.tabs.barHeight + 10) * barScale);
+    else this.hud.position.set(hudRight, 12 + 8 * barScale);
+    const topBottom = stackHud ? this.hud.y + 40 * hudScale : 12 + this.tabs.barHeight * barScale;
 
     // Title block.
     const scale = Math.min(1, width / 520, height / 860);
