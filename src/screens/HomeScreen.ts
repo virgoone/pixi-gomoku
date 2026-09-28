@@ -15,6 +15,7 @@ import { IconButton } from '../ui/Button';
 import { Hud } from '../ui/Hud';
 import { label } from '../ui/Label';
 import { LeaderboardView } from '../ui/LeaderboardView';
+import { RulesView } from '../ui/RulesView';
 import { ModeTile } from '../ui/ModeTile';
 import { PopTitle } from '../ui/PopTitle';
 import { TabBar } from '../ui/TabBar';
@@ -36,6 +37,7 @@ export class HomeScreen extends Container {
   private playView = new Container();
   private statsView = new Container();
   private boardView = new LeaderboardView();
+  private rulesView = new RulesView();
   private footer: Text;
   private time = 0;
   private unsubscribers: Array<() => void> = [];
@@ -61,6 +63,7 @@ export class HomeScreen extends Container {
         { id: 'play', text: '对战', icon: 'swords' },
         { id: 'stats', text: '战绩', icon: 'trophy' },
         { id: 'rank', text: '排行', icon: 'podium' },
+        { id: 'rules', text: '规则', icon: 'book' },
       ],
       'play',
       (id) => this.showTab(id),
@@ -76,9 +79,10 @@ export class HomeScreen extends Container {
     this.unsubscribers.push(onProfileChange(() => this.buildStats()), account.progress.onChange(() => this.buildStats()));
     this.statsView.visible = false;
     this.boardView.visible = false;
+    this.rulesView.visible = false;
     this.footer = label('五子连珠，一起开局', 'small', { fontSize: 12, fill: 0x9a8bc8 });
 
-    this.addChild(this.backdrop, this.stones, this.eyebrow, this.title, this.playView, this.statsView, this.boardView, this.footer, this.tabs, this.hud, this.sound);
+    this.addChild(this.backdrop, this.stones, this.eyebrow, this.title, this.playView, this.statsView, this.boardView, this.rulesView, this.footer, this.tabs, this.hud, this.sound);
   }
 
   private buildStats() {
@@ -123,16 +127,16 @@ export class HomeScreen extends Container {
   }
 
   private showTab(id: string) {
-    const views: Record<string, Container> = { play: this.playView, stats: this.statsView, rank: this.boardView };
+    const views: Record<string, Container> = { play: this.playView, stats: this.statsView, rank: this.boardView, rules: this.rulesView };
     for (const [key, view] of Object.entries(views)) view.visible = key === id;
     // The leaderboard polls only while it is on screen.
     if (id === 'rank') this.boardView.activate();
     else this.boardView.deactivate();
     // The logo makes room for the taller leaderboard panel.
-    const compact = id === 'rank';
+    const compact = id === 'rank' || id === 'rules';
     gsap.to([this.stones, this.eyebrow, this.title], { alpha: compact ? 0 : 1, duration: 0.2 });
     const showing = views[id];
-    const items = id === 'rank' ? [showing] : showing.children;
+    const items = compact ? [showing] : showing.children;
     items.forEach((child, index) => {
       const baseY = child.y;
       gsap.fromTo(child, { alpha: 0, y: baseY + 24 }, { alpha: 1, y: baseY, duration: 0.3, delay: index * 0.05, ease: 'back.out(2)' });
@@ -215,6 +219,8 @@ export class HomeScreen extends Container {
     const boardHeight = Math.min(620, areaBottom - boardTop);
     this.boardView.layout(Math.min(600, width - 24), boardHeight);
     this.boardView.position.set(width / 2, boardTop + boardHeight / 2);
+    this.rulesView.layout(Math.min(600, width - 24), boardHeight);
+    this.rulesView.position.copyFrom(this.boardView.position);
   }
 
   async show() {
