@@ -656,6 +656,7 @@ export const ICONS = {
   podium: () => icon('<path d="M24 30 H40 V54 H24 Z" fill="#fff" fill-opacity="0.25"/><path d="M8 38 H24 V54 H8 Z M40 44 H56 V54 H40 Z"/><path d="M32 10 L35 17 L42 17 L36 21 L38 28 L32 24 L26 28 L28 21 L22 17 L29 17 Z" fill="#fff"/>'),
   trophy: () => icon('<path d="M20 10 H44 V26 A12 12 0 0 1 20 26 Z" fill="#fff" fill-opacity="0.25"/><path d="M20 16 H10 Q10 30 22 30 M44 16 H54 Q54 30 42 30"/><path d="M32 38 V48 M22 54 H42"/>'),
   restart: () => icon('<path d="M48 22 A20 20 0 1 0 52 36"/><path d="M50 10 V24 H36"/>'),
+  book: () => icon('<path d="M32 16 Q22 10 10 12 V50 Q22 48 32 54 Q42 48 54 50 V12 Q42 10 32 16 Z" fill="#fff" fill-opacity="0.2"/><path d="M32 16 V54"/>'),
 };
 
 export type IconId = keyof typeof ICONS;
