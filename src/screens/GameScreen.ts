@@ -470,8 +470,8 @@ export class GameScreen extends Container {
       this.setDelegating(false);
       return;
     }
-    // The master's move would race the opponent's answer to our undo request.
-    if (this.undoRequest) {
+    // The master's move would race an undo being settled (ours, or theirs we accepted).
+    if (this.undoRequest || this.undoAnswer) {
       toast(this, '正在等待对方回复悔棋，稍后再托管', this.w);
       return;
     }
@@ -864,6 +864,8 @@ export class GameScreen extends Container {
     this.opponentDelegating = false;
     this.modeBar.setText('mode', this.modeText());
     this.closeUndoRequest();
+    // An undo we were answering can no longer be committed: free the board.
+    this.undoAnswer = null;
     this.undoButton.visible = !this.delegating;
     this.setupPlayers();
     this.nextTurn();
